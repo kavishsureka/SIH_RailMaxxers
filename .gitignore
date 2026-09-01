@@ -1,9 +1,10 @@
 .DS_Store
 .env
+.deps/
 node_modules/
 .next/
 dist/
-build/
+build*/
 coverage/
 work/
 benchmark-results/

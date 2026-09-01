@@ -16,7 +16,7 @@ Go API ─────────────── PostgreSQL
 C++ optimizer
   ├─ independent departmental baseline
   ├─ coordinated greedy
-  ├─ OR-Tools CP-SAT (portable fallback when OR-Tools is absent)
+  ├─ native OR-Tools CP-SAT
   └─ independent shared validator
 ```
 
@@ -26,23 +26,24 @@ The C++ CLI is the source of truth for plan creation, block derivation, validati
 
 Requirements: CMake 3.20+, a C++20 compiler, Go 1.23+, Node 22+, and npm.
 
+One-time setup (downloads OR-Tools locally, installs dependencies, builds, and verifies native CP-SAT):
+
 ```bash
-make generate
-make build-optimizer
-make test
+cp .env.example .env
+make setup
 ```
 
-Start the API and frontend in separate terminals:
+Daily development:
 
 ```bash
-make api
-make web
+make dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000). PostgreSQL is optional for local development; if `DATABASE_URL` is absent, the API remains fully usable without persistence.
 
 Detailed teammate documentation:
 
+- [`docs/NATIVE_CPSAT_TEAM_SETUP.md`](docs/NATIVE_CPSAT_TEAM_SETUP.md) — native CP-SAT installation, personal `.env`, short run commands, and verification.
 - [`docs/SETUP_AND_RUNNING.md`](docs/SETUP_AND_RUNNING.md) — prerequisites, local and Docker setup, PostgreSQL and database-free modes, testing, native OR-Tools, and troubleshooting.
 - [`docs/REPOSITORY_GUIDE.md`](docs/REPOSITORY_GUIDE.md) — folder ownership, file-by-file navigation, architecture boundaries, and runtime data flows.
 
@@ -111,7 +112,7 @@ tools/                dataset generator and report conversion
 
 ## CP-SAT availability
 
-The full OR-Tools model is compiled with `SIH_WITH_ORTOOLS=ON`. The default build uses a deterministic coordinated fallback because OR-Tools C++ is not normally available on a fresh machine. Results explicitly expose `native_cp_sat`, preventing the fallback from being presented as native CP-SAT. See `optimizer/ORTOOLS.md` for the native build command.
+The normal build compiles the full OR-Tools model with `SIH_WITH_ORTOOLS=ON`. `make setup-ortools` installs the pinned C++ binary distribution under the ignored `.deps/` directory, and every result exposes `native_cp_sat` so reports cannot misrepresent the engine. `make build-portable` is an explicit fallback for troubleshooting only. See `optimizer/ORTOOLS.md` for details.
 
 ## Intentional prototype limits
 

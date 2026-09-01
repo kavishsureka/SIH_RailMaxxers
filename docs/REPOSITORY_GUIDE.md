@@ -65,13 +65,18 @@ Change it when adding another C++ subproject or repository-wide CMake option.
 
 ### `Makefile`
 
-Thin aliases for normal workflows:
+The Makefile loads the root `.env` and provides short, repeatable workflows:
 
+- `setup` installs dependencies, native OR-Tools, builds, and verifies;
+- `setup-ortools` installs the pinned C++ distribution under `.deps/`;
 - `generate` regenerates `data/demo/`;
-- `build-optimizer` configures and compiles C++;
+- `build-optimizer` configures and compiles native CP-SAT;
+- `build-portable` creates a separate diagnostic fallback binary;
+- `verify-native` proves the runtime is OR-Tools-backed and validator-approved;
 - `build-api` compiles Go;
-- `test` runs the C++ and Go tests;
+- `test` runs C++, Go, and frontend checks;
 - `benchmark` creates JSON and CSV reports;
+- `dev` starts the API and frontend together;
 - `api` runs the local backend;
 - `web` runs the frontend development server;
 - `up` and `down` wrap Docker Compose.
@@ -80,7 +85,7 @@ Keep complex behavior in scripts or language-specific build files rather than gr
 
 ### `.env.example`
 
-Reference for supported environment variables. It is not automatically loaded by the Makefile.
+Tracked template for each teammate's ignored personal `.env`. The Makefile exports these values to build and runtime commands.
 
 ### `.gitignore`
 
@@ -215,6 +220,18 @@ Change it when the synthetic scenario shape changes. Use a fixed seed for reprod
 ### `scripts/benchmark.sh`
 
 Runs the compiled C++ benchmark, writes `benchmark-results/latest.json`, and starts CSV conversion.
+
+### `scripts/setup-ortools.sh`
+
+Detects the supported operating system and CPU, downloads the pinned official OR-Tools C++ archive, validates its layout, and installs it under the `.env`-controlled `ORTOOLS_ROOT`.
+
+### `scripts/dev.sh`
+
+Loads `.env`, resolves repository paths, starts the Go API in the background, runs Next.js in the foreground, and stops the API when development ends.
+
+### `tools/verify_native_cp_sat.py`
+
+Executes the CP-SAT CLI and fails unless `native_cp_sat` is true and the independent validator accepts the returned plan.
 
 ### `tools/benchmark_report.py`
 

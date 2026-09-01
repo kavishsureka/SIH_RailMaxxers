@@ -50,23 +50,20 @@ git clone <YOUR_GITHUB_REPOSITORY_URL>
 cd <CLONED_REPOSITORY_DIRECTORY>
 ```
 
-Install the exact locked frontend dependencies:
+Create your personal configuration and run the one-time native setup:
 
 ```bash
-cd frontend
-npm ci
-cd ..
+cp .env.example .env
+make setup
 ```
 
-Download Go modules:
+`make setup` installs locked frontend and Go dependencies, downloads the pinned OR-Tools C++ distribution to the ignored `.deps/` directory, builds the native optimizer, and verifies that CP-SAT reports `native_cp_sat: true` with a valid independent-validator result.
+
+For the supported platform list and teammate-oriented checklist, see `docs/NATIVE_CPSAT_TEAM_SETUP.md`.
 
 ```bash
-cd backend
-go mod download
-cd ..
+make install-deps
 ```
-
-The normal C++ build does not download a native C++ dependency. It builds the Independent and Greedy schedulers and a clearly labelled portable fallback for the CP-SAT command. Native OR-Tools setup is covered in section 11.
 
 ## 3. Demo dataset
 
@@ -90,6 +87,7 @@ From the repository root:
 
 ```bash
 make build-optimizer
+make verify-native
 ```
 
 The executable is created at:
@@ -108,37 +106,30 @@ Run all three algorithms directly:
 
 The command prints JSON containing Independent, Greedy, and CP-SAT plan results. Inspect `native_cp_sat` in the CP-SAT result:
 
-- `false` means the dependency-free portable fallback ran;
-- `true` means the binary was compiled against OR-Tools.
+- `true` is required for the normal native build;
+- `false` appears only in the explicit `make build-portable` troubleshooting build.
 
 ## 5. Local run without PostgreSQL
 
 This is the recommended everyday development setup. Benchmark results reach the dashboard but are not saved after the API process stops.
 
-### Terminal 1: Go API and C++ optimizer
-
-From the repository root:
+Leave `DATABASE_URL=` blank in `.env`, then start both services:
 
 ```bash
-unset DATABASE_URL
+make dev
+```
+
+For separate logs, use two terminals:
+
+```bash
+# Terminal 1
 make api
-```
 
-On PowerShell, clear an existing value with:
-
-```powershell
-Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue
-```
-
-`make api` builds C++ first and starts Go at `http://localhost:8080`.
-
-### Terminal 2: Next.js dashboard
-
-```bash
+# Terminal 2
 make web
 ```
 
-Open `http://localhost:3000`.
+The API runs at `http://localhost:8080`; open the dashboard at `http://localhost:3000`.
 
 The page should display three algorithm cards, the selected plan's weekly Gantt, KPI values, solver status, mandatory runtime, and validator status.
 
@@ -380,34 +371,32 @@ SOLVER_TIME_LIMIT_SECONDS=30 make benchmark
 
 ## 11. Native OR-Tools CP-SAT
 
-Install an OR-Tools C++ distribution that exports the `ortools::ortools` CMake target, then provide its prefix:
+Native CP-SAT is the default. The automated path is:
 
 ```bash
-cmake -S . -B build-ortools \
-  -DSIH_WITH_ORTOOLS=ON \
-  -DCMAKE_PREFIX_PATH=/absolute/path/to/ortools
-cmake --build build-ortools -j
+make setup-ortools
+make build-optimizer
+make verify-native
 ```
 
-Run the native binary:
+The dependency is installed locally at `.deps/or-tools`. CMake receives that location through `ortools_ROOT`; the machine does not need a global OR-Tools installation.
+
+The manual equivalent is:
 
 ```bash
-./build-ortools/optimizer/sih-optimizer benchmark \
-  --data data/demo \
-  --config config/optimizer.conf
+cmake -S . -B build -DSIH_WITH_ORTOOLS=ON \
+  -Dortools_ROOT="$PWD/.deps/or-tools" \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel 4
 ```
 
-Connect Go to that binary:
+The CP-SAT plan must report `"native_cp_sat": true`. See `optimizer/ORTOOLS.md` and `docs/NATIVE_CPSAT_TEAM_SETUP.md`.
+
+For a dependency-free diagnostic build only:
 
 ```bash
-cd backend
-OPTIMIZER_BIN=../build-ortools/optimizer/sih-optimizer \
-DATA_DIR=../data/demo \
-OPTIMIZER_CONFIG=../config/optimizer.conf \
-go run ./cmd/api
+make build-portable
 ```
-
-The CP-SAT plan must report `"native_cp_sat": true`. See `optimizer/ORTOOLS.md` for the focused native-build notes.
 
 ## 12. Environment variables
 
@@ -420,8 +409,11 @@ The CP-SAT plan must report `"native_cp_sat": true`. See `optimizer/ORTOOLS.md` 
 | `OPTIMIZER_CONFIG` | `../config/optimizer.conf` from `backend/` | Objective configuration |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8080` | Browser-visible API base URL |
 | `SOLVER_TIME_LIMIT_SECONDS` | `10` in benchmark script | CP-SAT command time limit |
+| `ORTOOLS_ROOT` | `.deps/or-tools` | Local OR-Tools C++ distribution |
+| `ORTOOLS_VERSION` | `9.12` | Version pinned by the setup script |
+| `CMAKE_BUILD_PARALLEL_LEVEL` | `4` | Parallel C++ build jobs |
 
-`.env.example` is a reference. The Makefile does not automatically load `.env`; export variables, use a shell loader, or use Compose.
+Copy `.env.example` to `.env`. The Makefile and development scripts load it automatically; `.env` is ignored by Git and must not be committed.
 
 ## 13. Troubleshooting
 
