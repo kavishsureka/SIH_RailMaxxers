@@ -62,6 +62,20 @@ struct Dependency {
 struct Placement { std::string task_id; int start_slot{}; int end_slot{}; };
 struct Block { std::string corridor_id; int start_slot{}; int end_slot{}; };
 
+struct CandidateEvaluation {
+  int start_slot{};
+  int end_slot{};
+  std::string status;
+  int train_cost{};
+  int added_downtime_minutes{};
+  bool block_reuse{};
+};
+
+struct TaskTrace {
+  std::string task_id;
+  std::vector<CandidateEvaluation> candidates;
+};
+
 struct Weights {
   std::int64_t block_count{400};
   std::int64_t downtime_minute{2};
@@ -103,6 +117,7 @@ struct Plan {
   bool native_cp_sat{};
   std::vector<Placement> placements;
   std::vector<Block> blocks;
+  std::vector<TaskTrace> task_traces;
   Metrics metrics;
   ValidationResult validation;
 };

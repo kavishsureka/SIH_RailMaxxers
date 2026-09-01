@@ -76,6 +76,8 @@ make generate-presets
 - `GET|POST /api/benchmark` — run all algorithms and optionally persist the result
 - `GET /api/plans/{independent|greedy|cp-sat}` — run one algorithm
 
+Plan responses include stable block IDs, task placements, and compact per-task candidate traces. The trace labels selected, feasible, hard-train-conflicting, and too-short intervals and reports measured train cost, added downtime, and compatible-block reuse for each evaluated window.
+
 ## Planning model
 
 Hard rules checked by the shared validator:

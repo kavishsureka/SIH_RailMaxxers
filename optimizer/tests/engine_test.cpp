@@ -56,6 +56,10 @@ int main() {
     require(plan.validation.valid, "CP-SAT soft-impact fixture should validate");
     require(plan.metrics.scheduled_tasks == 1, "CP-SAT must schedule the task exactly once");
     require(plan.metrics.train_impact == 0, "CP-SAT should prefer the equal-cost clear placement");
+    require(plan.task_traces.size() == 1, "plan should expose one evidence trace per task");
+    require(!plan.task_traces[0].candidates.empty(), "task trace should expose evaluated windows");
+    require(plan.task_traces[0].candidates[0].status == "SELECTED",
+            "selected placement should be explicit in the evidence trace");
   }
 
   {

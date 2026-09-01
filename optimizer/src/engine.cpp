@@ -170,6 +170,9 @@ std::vector<Task> ordered_tasks(const Dataset& data, std::optional<std::string> 
   return tasks;
 }
 
+std::vector<TaskTrace> build_task_traces(const Dataset& data,
+                                         const std::vector<Placement>& placements);
+
 Plan finalize(std::string algorithm, const Dataset& data, const Weights& weights,
               std::vector<Placement> placements, double preprocessing_ms, double algorithm_ms,
               Clock::time_point total_started,
@@ -180,6 +183,7 @@ Plan finalize(std::string algorithm, const Dataset& data, const Weights& weights
   plan.native_cp_sat = native;
   plan.placements = std::move(placements);
   plan.blocks = derive_blocks(data, plan.placements);
+  plan.task_traces = build_task_traces(data, plan.placements);
   plan.validation = validate(data, plan.placements);
   plan.metrics = calculate_metrics(data, plan.placements, plan.blocks, weights);
   plan.preprocessing_ms = preprocessing_ms;
@@ -259,6 +263,71 @@ std::vector<Placement> departmental_schedule(const Dataset& data, const Candidat
                                std::move(combined));
   }
   return combined;
+}
+
+std::vector<TaskTrace> build_task_traces(const Dataset& data,
+                                         const std::vector<Placement>& placements) {
+  const auto feasible = generate_candidate_windows(data);
+  std::vector<TaskTrace> traces;
+  traces.reserve(data.tasks.size());
+  for (const auto& task : data.tasks) {
+    TaskTrace trace{task.id, {}};
+    const auto selected = std::find_if(placements.begin(), placements.end(), [&](const auto& placement) {
+      return placement.task_id == task.id;
+    });
+    auto without = placements;
+    without.erase(std::remove_if(without.begin(), without.end(), [&](const auto& placement) {
+      return placement.task_id == task.id;
+    }), without.end());
+    const auto other_blocks = derive_blocks(data, without);
+    auto evaluate = [&](int start, int end, std::string status) {
+      CandidateEvaluation item{start, end, std::move(status), 0, 0, false};
+      for (const auto& train : data.trains) {
+        if (!train.hard_conflict && train.corridor_id == task.corridor_id &&
+            overlap(start, end, train.start_slot, train.end_slot)) item.train_cost += train.impact_weight;
+      }
+      for (int slot = start; slot < end; ++slot) {
+        const bool covered = std::any_of(other_blocks.begin(), other_blocks.end(), [&](const auto& block) {
+          return block.corridor_id == task.corridor_id && block.start_slot <= slot && slot < block.end_slot;
+        });
+        if (!covered) item.added_downtime_minutes += kSlotMinutes;
+      }
+      item.block_reuse = std::any_of(other_blocks.begin(), other_blocks.end(), [&](const auto& block) {
+        return block.corridor_id == task.corridor_id && block.start_slot <= end && start <= block.end_slot;
+      });
+      trace.candidates.push_back(std::move(item));
+    };
+
+    if (selected != placements.end()) evaluate(selected->start_slot, selected->end_slot, "SELECTED");
+    const auto candidate_it = feasible.find(task.id);
+    if (candidate_it != feasible.end()) {
+      for (const auto& window : candidate_it->second) {
+        for (const int start : {window.start_slot, window.end_slot - task.duration_slots}) {
+          if (start < window.start_slot || start + task.duration_slots > window.end_slot) continue;
+          if (selected != placements.end() && start == selected->start_slot) continue;
+          const bool duplicate = std::any_of(trace.candidates.begin(), trace.candidates.end(), [&](const auto& item) {
+            return item.start_slot == start && item.end_slot == start + task.duration_slots;
+          });
+          if (!duplicate && trace.candidates.size() < 5) evaluate(start, start + task.duration_slots, "FEASIBLE");
+        }
+        if (trace.candidates.size() >= 5) break;
+      }
+    }
+    for (const auto& train : data.trains) {
+      if (!train.hard_conflict || train.corridor_id != task.corridor_id || trace.candidates.size() >= 7) continue;
+      const int start = std::max(task.earliest_slot, train.start_slot);
+      const int end = std::min(effective_latest_end(task), std::max(train.end_slot, start + task.duration_slots));
+      if (start < end) evaluate(start, end, "HARD_TRAIN_CONFLICT");
+    }
+    for (const auto& availability : data.availability) {
+      if (availability.corridor_id != task.corridor_id || trace.candidates.size() >= 8) continue;
+      const int start = std::max(task.earliest_slot, availability.start_slot);
+      const int end = std::min(effective_latest_end(task), availability.end_slot);
+      if (start < end && end - start < task.duration_slots) evaluate(start, end, "TOO_SHORT");
+    }
+    traces.push_back(std::move(trace));
+  }
+  return traces;
 }
 
 }  // namespace
@@ -665,7 +734,22 @@ std::string plan_json(const Plan& p) {
   out << "],\"blocks\":[";
   for (std::size_t i = 0; i < p.blocks.size(); ++i) {
     if (i) out << ','; const auto& b = p.blocks[i];
-    out << "{\"corridor_id\":\"" << escape_json(b.corridor_id) << "\",\"start_slot\":" << b.start_slot << ",\"end_slot\":" << b.end_slot << '}';
+    out << "{\"id\":\"B-" << std::setfill('0') << std::setw(3) << (i + 1) << std::setfill(' ')
+        << "\",\"corridor_id\":\"" << escape_json(b.corridor_id) << "\",\"start_slot\":" << b.start_slot << ",\"end_slot\":" << b.end_slot << '}';
+  }
+  out << "],\"task_traces\":[";
+  for (std::size_t i = 0; i < p.task_traces.size(); ++i) {
+    if (i) out << ',';
+    out << "{\"task_id\":\"" << escape_json(p.task_traces[i].task_id) << "\",\"candidates\":[";
+    for (std::size_t j = 0; j < p.task_traces[i].candidates.size(); ++j) {
+      if (j) out << ',';
+      const auto& candidate = p.task_traces[i].candidates[j];
+      out << "{\"start_slot\":" << candidate.start_slot << ",\"end_slot\":" << candidate.end_slot
+          << ",\"status\":\"" << candidate.status << "\",\"train_cost\":" << candidate.train_cost
+          << ",\"added_downtime_minutes\":" << candidate.added_downtime_minutes
+          << ",\"block_reuse\":" << (candidate.block_reuse ? "true" : "false") << '}';
+    }
+    out << "]}";
   }
   out << "]}";
   return out.str();
