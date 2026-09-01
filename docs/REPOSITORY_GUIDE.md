@@ -199,7 +199,7 @@ Pairwise task-type compatibility used by the optimizer and validator. Unlisted p
 
 ### `config/optimizer.conf`
 
-Active runtime configuration parsed by C++. It defines `wB`, `wD`, `wT`, `wO`, and `wC`.
+Active runtime configuration parsed by C++. It defines `wB`, `wD`, `wT`, `wL`, and `wV` for block count, downtime, train impact, lateness minutes, and deadline violations.
 
 ### `config/priority.conf`
 
@@ -343,7 +343,7 @@ Single dashboard page containing:
 - loading and error state;
 - active-algorithm selection;
 - comparison cards;
-- weekly Gantt;
+- four-week monthly Gantt;
 - KPI and validator panels.
 
 Components are colocated for prototype speed. Split API helpers, cards, and charts when more screens or tests are added.
@@ -439,13 +439,17 @@ High-level benchmark JSON:
 
 ```json
 {
-  "horizon_slots": 672,
+  "horizon_days": 28,
+  "horizon_weeks": 4,
+  "horizon_slots": 2688,
   "slot_minutes": 15,
   "plans": [
     {
       "algorithm": "greedy",
       "solver_status": "FEASIBLE",
-      "runtime_ms": 12.5,
+      "preprocessing_ms": 2.5,
+      "algorithm_ms": 10.0,
+      "total_runtime_ms": 13.1,
       "native_cp_sat": false,
       "validation": {"valid": true, "violations": []},
       "metrics": {},

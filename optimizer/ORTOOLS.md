@@ -22,7 +22,6 @@ The CLI and JSON contract are identical across builds. For troubleshooting only,
 
 For supported archives and teammate setup, see [`../docs/NATIVE_CPSAT_TEAM_SETUP.md`](../docs/NATIVE_CPSAT_TEAM_SETUP.md).
 
-The native model uses Boolean task-start variables on the 672-slot grid, shared corridor-active and block-start variables, optional task scheduling, compatibility, protected-train, all-electric power-block, availability, and dependency constraints. Its single configurable integer objective is:
+The native model uses Boolean candidate-start variables on the 2,688-slot monthly grid, shared corridor-active and block-start variables, compulsory task scheduling, compatibility, protected-train, availability, due-date, and dependency constraints. Candidate preprocessing subtracts merged HARD train intervals only; SOFT movements remain in the domain and are costed. Its single configurable integer objective is:
 
-`wB*block_count + wD*downtime_minutes + wT*train_impact + wO*overdue_penalty + wC*critical_noncompletion_penalty`.
-
+`wB*block_count + wD*downtime_minutes + wT*train_impact + wL*lateness_minutes + wV*deadline_violations`.

@@ -9,13 +9,17 @@ The two supplied SIH planning references were used as design input, then reduced
 - consolidation of compatible simultaneous work into a common corridor block;
 - independent baseline, coordinated greedy, advanced optimizer, independent validator, and KPI benchmark flow;
 - block count, infrastructure downtime, train impact, priority/overdue completion, and runtime reporting;
-- synthetic interactive scenario with five corridors, roughly thirty tasks, and fifty movements.
+- synthetic interactive scenario with 10 corridors, 120 tasks, and 120 movements per day over four weeks;
+- generated 100-, 250-, and 500-task benchmark presets.
 
 ## Agreed changes implemented
 
 - Go API and C++ optimizer are used from the start;
-- every train is electric, so there is no traction dimension and power-block work conflicts with every overlapping movement;
-- the horizon is a transparent 672-slot grid: seven days at fifteen minutes per slot;
+- every train is electric, so there is no traction dimension; HARD movements are forbidden and SOFT movements remain feasible, including for power-block work;
+- the horizon is a transparent 2,688-slot grid: 28 days at fifteen minutes per slot;
+- all tasks are compulsory and must appear exactly once by month end;
+- candidate windows are shared by all algorithms and subtract merged HARD intervals only;
+- CP-SAT solves the complete month in one model rather than four sequential weekly solves;
 - optimization uses one configurable weighted objective rather than lexicographic stages;
 - runtime is mandatory for Independent, Greedy, and CP-SAT;
 - all three algorithms pass through the same validator and metric calculator.

@@ -4,25 +4,29 @@ import { useEffect, useMemo, useState } from "react";
 
 type Metrics = {
   objective: number; block_count: number; downtime_minutes: number; train_impact: number;
-  overdue_penalty: number; critical_noncompletion: number; scheduled_tasks: number; critical_completed: number;
+  lateness_minutes: number; deadline_violations: number; scheduled_tasks: number; total_tasks: number;
+  critical_completed: number; critical_total: number;
 };
 type Block = { corridor_id: string; start_slot: number; end_slot: number };
 type Plan = {
-  algorithm: string; solver_status: string; runtime_ms: number; native_cp_sat: boolean;
+  algorithm: string; solver_status: string; preprocessing_ms: number; algorithm_ms: number;
+  total_runtime_ms: number; native_cp_sat: boolean;
   validation: { valid: boolean; violations: string[] }; metrics: Metrics; blocks: Block[];
 };
-type Benchmark = { horizon_slots: number; slot_minutes: number; plans: Plan[] };
+type Benchmark = { horizon_days: number; horizon_weeks: number; horizon_slots: number; slot_minutes: number; plans: Plan[] };
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 const labels: Record<string, string> = { independent: "Independent", greedy: "Coordinated Greedy", "cp-sat": "CP-SAT" };
-const colors: Record<string, string> = { C1: "#37d5a5", C2: "#f6c85f", C3: "#ef6f88", C4: "#70a7ff", C5: "#a78bfa" };
+const corridors = Array.from({ length: 10 }, (_, index) => `C${index + 1}`);
+const palette = ["#37d5a5", "#f6c85f", "#ef6f88", "#70a7ff", "#a78bfa", "#f59e6b", "#55c2ff", "#d5e15b", "#ff8fc7", "#8de1c2"];
+const colors = Object.fromEntries(corridors.map((corridor, index) => [corridor, palette[index]]));
 
 function formatSlot(slot: number) {
   const day = Math.floor(slot / 96);
   const within = slot % 96;
   const hour = Math.floor(within / 4).toString().padStart(2, "0");
   const minute = ((within % 4) * 15).toString().padStart(2, "0");
-  return `${["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][day]} ${hour}:${minute}`;
+  return `W${Math.floor(day / 7) + 1} ${["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][day % 7]} ${hour}:${minute}`;
 }
 
 function Metric({ label, value, suffix = "" }: { label: string; value: string | number; suffix?: string }) {
@@ -51,13 +55,13 @@ export default function Home() {
   return <main>
     <header>
       <div className="brand"><div className="mark">RB</div><div><b>RailBlock</b><span>SIH 26027 planner</span></div></div>
-      <div className="scope"><span className="pulse"/>7 days · 15-minute slots · all-electric</div>
+      <div className="scope"><span className="pulse"/>28 days · 4 weeks · all-electric</div>
       <button className="primary" onClick={run} disabled={loading}>{loading ? "Solving…" : "Run benchmark"}</button>
     </header>
 
     <section className="hero">
       <div><p className="eyebrow">Coordinated maintenance control</p><h1>Make every block<br/><em>work harder.</em></h1></div>
-      <p className="intro">One weekly plan for Engineering, S&amp;T and TRD — balanced against protected train movements and independently verified.</p>
+      <p className="intro">One monthly plan for Engineering, S&amp;T and TRD — every task placed exactly once, balanced against protected and flexible train movements.</p>
     </section>
 
     {error && <div className="notice"><b>Planner unavailable</b><span>{error}</span><button onClick={run}>Retry</button></div>}
@@ -67,20 +71,20 @@ export default function Home() {
         {data.plans.map((item) => <button key={item.algorithm} className={`plan-card ${active === item.algorithm ? "selected" : ""}`} onClick={() => setActive(item.algorithm)}>
           <div className="card-top"><span>{labels[item.algorithm] ?? item.algorithm}</span><i className={item.validation.valid ? "valid" : "invalid"}>{item.validation.valid ? "VALID" : `${item.validation.violations.length} ISSUES`}</i></div>
           <strong>{item.metrics.objective.toLocaleString("en-IN")}</strong><small>weighted objective</small>
-          <div className="mini"><span>{item.metrics.block_count} blocks</span><span>{item.metrics.downtime_minutes / 60}h downtime</span><span>{item.runtime_ms.toFixed(1)}ms</span></div>
+          <div className="mini"><span>{item.metrics.scheduled_tasks}/{item.metrics.total_tasks} tasks</span><span>{item.metrics.block_count} blocks</span><span>{item.total_runtime_ms.toFixed(1)}ms</span></div>
         </button>)}
       </section>
 
       {plan && <section className="workspace">
         <div className="panel gantt-panel">
-          <div className="panel-head"><div><p className="eyebrow">Weekly possession map</p><h2>{labels[plan.algorithm]} plan</h2></div><div className="legend">{["C1","C2","C3","C4","C5"].map(c => <span key={c}><i style={{background: colors[c]}}/>{c}</span>)}</div></div>
-          <div className="days">{["MON","TUE","WED","THU","FRI","SAT","SUN"].map(day => <span key={day}>{day}</span>)}</div>
+          <div className="panel-head"><div><p className="eyebrow">Monthly possession map</p><h2>{labels[plan.algorithm]} plan</h2></div><div className="legend">{corridors.map(c => <span key={c}><i style={{background: colors[c]}}/>{c}</span>)}</div></div>
+          <div className="days">{["WEEK 1","WEEK 2","WEEK 3","WEEK 4"].map(week => <span key={week}>{week}</span>)}</div>
           <div className="gantt">
-            {["C1","C2","C3","C4","C5"].map((corridor, row) => <div className="gantt-row" key={corridor} style={{gridRow: row + 1}}><b>{corridor}</b></div>)}
+            {corridors.map((corridor, row) => <div className="gantt-row" key={corridor} style={{gridRow: row + 1}}><b>{corridor}</b></div>)}
             {plan.blocks.map((block, index) => {
               const row = Number(block.corridor_id.slice(1));
               return <div key={`${block.corridor_id}-${index}`} className="block" title={`${block.corridor_id}: ${formatSlot(block.start_slot)} – ${formatSlot(block.end_slot)}`}
-                style={{gridRow: row, left: `${(block.start_slot / 672) * 100}%`, width: `${Math.max(.5, ((block.end_slot - block.start_slot) / 672) * 100)}%`, background: colors[block.corridor_id]}}/>;
+                style={{top: `${((row - 1) / corridors.length) * 100 + 2.8}%`, left: `${(block.start_slot / data.horizon_slots) * 100}%`, width: `${Math.max(.3, ((block.end_slot - block.start_slot) / data.horizon_slots) * 100)}%`, background: colors[block.corridor_id]}}/>;
             })}
           </div>
         </div>
@@ -89,9 +93,11 @@ export default function Home() {
           <div className="panel-head"><div><p className="eyebrow">Plan health</p><h2>{plan.solver_status.replaceAll("_", " ")}</h2></div><span className={plan.validation.valid ? "shield ok" : "shield bad"}>✓</span></div>
           <div className="metric-grid">
             <Metric label="Blocks" value={plan.metrics.block_count}/><Metric label="Downtime" value={(plan.metrics.downtime_minutes/60).toFixed(1)} suffix="h"/>
-            <Metric label="Train impact" value={plan.metrics.train_impact}/><Metric label="Runtime" value={plan.runtime_ms.toFixed(1)} suffix="ms"/>
-            <Metric label="Tasks placed" value={plan.metrics.scheduled_tasks}/><Metric label="Critical done" value={plan.metrics.critical_completed}/>
+            <Metric label="Train impact" value={plan.metrics.train_impact}/><Metric label="Total runtime" value={plan.total_runtime_ms.toFixed(1)} suffix="ms"/>
+            <Metric label="Tasks placed" value={`${plan.metrics.scheduled_tasks}/${plan.metrics.total_tasks}`}/><Metric label="Critical done" value={`${plan.metrics.critical_completed}/${plan.metrics.critical_total}`}/>
+            <Metric label="Late minutes" value={plan.metrics.lateness_minutes}/><Metric label="Deadline misses" value={plan.metrics.deadline_violations}/>
           </div>
+          <div className="runtime-breakdown"><span>Preprocess <b>{plan.preprocessing_ms.toFixed(1)}ms</b></span><span>Algorithm / solver <b>{plan.algorithm_ms.toFixed(1)}ms</b></span></div>
           <div className="validator"><span>Independent validator</span><b>{plan.validation.valid ? "All hard rules pass" : plan.validation.violations[0]}</b></div>
           {plan.algorithm === "cp-sat" && <p className="solver-note">{plan.native_cp_sat ? "Native OR-Tools CP-SAT model" : "Portable solver fallback — enable OR-Tools for native CP-SAT"}</p>}
         </aside>

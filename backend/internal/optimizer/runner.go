@@ -9,17 +9,21 @@ import (
 )
 
 type Plan struct {
-	Algorithm    string          `json:"algorithm"`
-	SolverStatus string          `json:"solver_status"`
-	RuntimeMS    float64         `json:"runtime_ms"`
-	NativeCPSAT  bool            `json:"native_cp_sat"`
-	Validation   json.RawMessage `json:"validation"`
-	Metrics      json.RawMessage `json:"metrics"`
-	Placements   json.RawMessage `json:"placements"`
-	Blocks       json.RawMessage `json:"blocks"`
+	Algorithm       string          `json:"algorithm"`
+	SolverStatus    string          `json:"solver_status"`
+	PreprocessingMS float64         `json:"preprocessing_ms"`
+	AlgorithmMS     float64         `json:"algorithm_ms"`
+	TotalRuntimeMS  float64         `json:"total_runtime_ms"`
+	NativeCPSAT     bool            `json:"native_cp_sat"`
+	Validation      json.RawMessage `json:"validation"`
+	Metrics         json.RawMessage `json:"metrics"`
+	Placements      json.RawMessage `json:"placements"`
+	Blocks          json.RawMessage `json:"blocks"`
 }
 
 type Benchmark struct {
+	HorizonDays  int    `json:"horizon_days"`
+	HorizonWeeks int    `json:"horizon_weeks"`
 	HorizonSlots int    `json:"horizon_slots"`
 	SlotMinutes  int    `json:"slot_minutes"`
 	Plans        []Plan `json:"plans"`
@@ -64,4 +68,3 @@ func (r CommandRunner) Plan(ctx context.Context, algorithm string) ([]byte, erro
 	}
 	return r.run(ctx, algorithm)
 }
-

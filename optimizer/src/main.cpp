@@ -25,7 +25,7 @@ int main(int argc, char** argv) {
     }
     const auto data_dir = option(args, "--data", "data/demo");
     const auto config = option(args, "--config", "config/optimizer.conf");
-    const int time_limit = std::stoi(option(args, "--time-limit", "10"));
+    const int time_limit = std::stoi(option(args, "--time-limit", "15"));
     const auto data = sih::load_dataset(data_dir);
     const auto weights = sih::load_weights(config);
 

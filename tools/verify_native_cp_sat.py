@@ -48,7 +48,7 @@ def main() -> int:
     print(
         "Native CP-SAT verified: "
         f"status={result['solver_status']}, "
-        f"runtime_ms={result['runtime_ms']}, "
+        f"total_runtime_ms={result['total_runtime_ms']}, "
         f"objective={result['metrics']['objective']}"
     )
     return 0

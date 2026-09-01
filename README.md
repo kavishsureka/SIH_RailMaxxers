@@ -1,8 +1,8 @@
 # RailBlock — SIH 26027 prototype
 
-RailBlock is a seven-day railway maintenance block planner for Engineering, S&T, and TRD. It compares an independent departmental baseline, a coordinated greedy scheduler, and an OR-Tools CP-SAT model through one independent validator and one KPI contract.
+RailBlock is a 28-day railway maintenance block planner for Engineering, S&T, and TRD. It compares an independent departmental baseline, a coordinated greedy scheduler, and a full-horizon OR-Tools CP-SAT model through one independent validator and one KPI contract.
 
-The prototype is deliberately small and explainable: 15-minute slots, five corridors, thirty tasks, fifty synthetic train movements, and no production-only integration layer. Every train is electric; there is no traction or diesel field anywhere in the data contract or database schema.
+The live-demo scenario contains 10 corridors, 120 monthly tasks, and 120 synthetic train movements per day across four weeks. Every train is electric; there is no traction or diesel field anywhere in the data contract or database schema. Generated 100-, 250-, and 500-task benchmark presets are available under `data/benchmarks/`.
 
 ## Architecture
 
@@ -63,7 +63,10 @@ docker compose up --build
 make benchmark
 
 # Regenerate a deterministic scenario
-python3 tools/generate_demo.py --seed 26027 --output data/demo
+make generate
+
+# Regenerate 100/250/500-task benchmark presets
+make generate-presets
 ```
 
 ## REST API
@@ -77,13 +80,15 @@ python3 tools/generate_demo.py --seed 26027 --output data/demo
 
 Hard rules checked by the shared validator:
 
-1. one continuous placement with the configured duration;
-2. placement inside task and corridor availability windows;
-3. no overlap with a protected (`HARD`) train movement;
-4. power-block work cannot overlap any train movement because all trains are electric;
-5. incompatible work types cannot overlap on the same corridor;
-6. task dependencies and minimum lag are respected;
-7. mandatory work is scheduled.
+1. every monthly task is scheduled exactly once in the 28-day horizon;
+2. one continuous placement with the configured duration;
+3. placement inside task and corridor availability windows;
+4. no overlap with a protected (`HARD`) train movement;
+5. mandatory/critical work finishes within its tighter due-date window;
+6. incompatible work types cannot overlap on the same corridor;
+7. task dependencies and minimum lag are respected.
+
+Candidate preprocessing intersects task windows with corridor availability, sorts and merges only `HARD` forbidden train intervals, computes free intervals, and removes intervals shorter than the task duration. `SOFT` train movements stay feasible and add train-impact cost when a selected block overlaps them. Power-block tasks follow the same HARD/SOFT contract; the all-electric assumption removes traction-specific exceptions, not SOFT feasibility.
 
 The configurable weighted objective in `config/optimizer.conf` is:
 
@@ -91,11 +96,11 @@ The configurable weighted objective in `config/optimizer.conf` is:
 minimize(wB*block_count
        + wD*downtime_minutes
        + wT*train_impact
-       + wO*overdue_penalty
-       + wC*critical_noncompletion_penalty)
+       + wL*lateness_minutes
+       + wV*deadline_violations)
 ```
 
-`wC` is dominant by default. Objective weights and runtimes are recorded with benchmark outputs. Contiguous active corridor slots are consolidated into shared blocks, so simultaneous compatible work creates one period of infrastructure downtime rather than the sum of departmental task durations.
+There is no unscheduled-task term because unscheduling is infeasible. Objective weights and `preprocessing_ms`, `algorithm_ms`, and `total_runtime_ms` are recorded for every algorithm. Contiguous active corridor slots are consolidated into shared blocks, so simultaneous compatible work creates one period of infrastructure downtime rather than the sum of departmental task durations.
 
 ## Repository map
 
@@ -104,7 +109,7 @@ backend/              Go REST API and PostgreSQL repository
 config/               objective, priority, and train-impact policy
 data/demo/            deterministic hackathon dataset
 db/migrations/        minimal internal-round PostgreSQL schema
-frontend/             Next.js comparison dashboard and weekly Gantt
+frontend/             Next.js comparison dashboard and four-week Gantt
 optimizer/            C++ schedulers, objective, block builder, validator
 scripts/              benchmark pipeline
 tools/                dataset generator and report conversion

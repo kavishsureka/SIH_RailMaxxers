@@ -131,7 +131,7 @@ make web
 
 The API runs at `http://localhost:8080`; open the dashboard at `http://localhost:3000`.
 
-The page should display three algorithm cards, the selected plan's weekly Gantt, KPI values, solver status, mandatory runtime, and validator status.
+The page should display three algorithm cards, the selected plan's four-week Gantt, completed-workload totals, KPI values, solver status, runtime breakdown, and validator status.
 
 ### Check the API manually
 

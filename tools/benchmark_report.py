@@ -6,9 +6,10 @@ from pathlib import Path
 
 source, destination = map(Path, sys.argv[1:3])
 payload = json.loads(source.read_text())
-fields = ["algorithm", "solver_status", "native_cp_sat", "runtime_ms", "valid", "violations",
-          "objective", "block_count", "downtime_minutes", "train_impact", "overdue_penalty",
-          "critical_noncompletion", "scheduled_tasks", "critical_completed"]
+fields = ["algorithm", "solver_status", "native_cp_sat", "preprocessing_ms", "algorithm_ms",
+          "total_runtime_ms", "valid", "violations", "objective", "block_count",
+          "downtime_minutes", "train_impact", "lateness_minutes", "deadline_violations",
+          "scheduled_tasks", "total_tasks", "critical_completed", "critical_total"]
 with destination.open("w", newline="") as stream:
     writer = csv.DictWriter(stream, fieldnames=fields)
     writer.writeheader()
@@ -18,4 +19,3 @@ with destination.open("w", newline="") as stream:
         row["valid"] = plan["validation"]["valid"]
         row["violations"] = len(plan["validation"]["violations"])
         writer.writerow(row)
-

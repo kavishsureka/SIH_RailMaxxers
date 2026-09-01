@@ -9,7 +9,10 @@
 namespace sih {
 
 constexpr int kSlotMinutes = 15;
-constexpr int kHorizonSlots = 7 * 24 * 4;
+constexpr int kSlotsPerDay = 24 * 4;
+constexpr int kHorizonDays = 28;
+constexpr int kHorizonWeeks = 4;
+constexpr int kHorizonSlots = kHorizonDays * kSlotsPerDay;
 
 struct Corridor { std::string id; std::string name; };
 
@@ -43,6 +46,13 @@ struct AvailabilityWindow {
   int end_slot{};
 };
 
+struct CandidateWindow {
+  int start_slot{};
+  int end_slot{};
+};
+
+using CandidateWindows = std::map<std::string, std::vector<CandidateWindow>>;
+
 struct Dependency {
   std::string predecessor_id;
   std::string successor_id;
@@ -56,8 +66,8 @@ struct Weights {
   std::int64_t block_count{400};
   std::int64_t downtime_minute{2};
   std::int64_t train_impact{25};
-  std::int64_t overdue_penalty{300};
-  std::int64_t critical_noncompletion{100000};
+  std::int64_t lateness_minute{5};
+  std::int64_t deadline_violation{5000};
 };
 
 struct Dataset {
@@ -73,10 +83,12 @@ struct Metrics {
   int block_count{};
   int downtime_minutes{};
   int train_impact{};
-  int overdue_penalty{};
-  int critical_noncompletion{};
+  int lateness_minutes{};
+  int deadline_violations{};
   int scheduled_tasks{};
+  int total_tasks{};
   int critical_completed{};
+  int critical_total{};
   std::int64_t objective{};
 };
 
@@ -85,7 +97,9 @@ struct ValidationResult { bool valid{}; std::vector<std::string> violations; };
 struct Plan {
   std::string algorithm;
   std::string solver_status{"FEASIBLE"};
-  double runtime_ms{};
+  double preprocessing_ms{};
+  double algorithm_ms{};
+  double total_runtime_ms{};
   bool native_cp_sat{};
   std::vector<Placement> placements;
   std::vector<Block> blocks;
@@ -94,4 +108,3 @@ struct Plan {
 };
 
 }  // namespace sih
-
