@@ -46,7 +46,7 @@ The default file runs without PostgreSQL:
 DATABASE_URL=
 API_ADDR=:8080
 OPTIMIZER_BIN=../build/optimizer/sih-optimizer
-DATA_DIR=../data/demo
+DATA_ROOT=../data/scenarios
 OPTIMIZER_CONFIG=../config/optimizer.conf
 NEXT_PUBLIC_API_URL=http://localhost:8080
 ORTOOLS_ROOT=.deps/or-tools

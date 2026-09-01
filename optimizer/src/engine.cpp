@@ -258,9 +258,20 @@ std::vector<Placement> greedy_schedule(const Dataset& data, const CandidateWindo
 std::vector<Placement> departmental_schedule(const Dataset& data, const CandidateWindows& candidates,
                                               const Weights& weights) {
   std::vector<Placement> combined;
-  for (const std::string department : {"ENGINEERING", "ST", "TRD"}) {
-    combined = greedy_schedule(data, candidates, weights, ordered_tasks(data, department), true, false,
-                               std::move(combined));
+  std::unordered_set<std::string> scheduled;
+  for (std::size_t pass = 0; pass < data.tasks.size(); ++pass) {
+    const auto before = combined.size();
+    for (const std::string department : {"ENGINEERING", "ST", "TRD"}) {
+      auto pending = ordered_tasks(data, department);
+      pending.erase(std::remove_if(pending.begin(), pending.end(), [&](const Task& task) {
+        return scheduled.contains(task.id);
+      }), pending.end());
+      combined = greedy_schedule(data, candidates, weights, pending, true, false,
+                                 std::move(combined));
+      scheduled.clear();
+      for (const auto& placement : combined) scheduled.insert(placement.task_id);
+    }
+    if (combined.size() == data.tasks.size() || combined.size() == before) break;
   }
   return combined;
 }

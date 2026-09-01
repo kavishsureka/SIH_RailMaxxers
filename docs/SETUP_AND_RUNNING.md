@@ -67,19 +67,13 @@ make install-deps
 
 ## 3. Demo dataset
 
-The repository already contains deterministic input under `data/demo/`. Regeneration is optional.
+The repository already contains three deterministic inputs under `data/scenarios/`. Regeneration is optional.
 
 ```bash
 make generate
 ```
 
-Equivalent command with the shared seed:
-
-```bash
-python3 tools/generate_demo.py --seed 26027 --output data/demo
-```
-
-This replaces the CSV contents in `data/demo/`. Commit those changes only when the team intentionally wants to update the shared scenario.
+`make generate` recreates Alpha, Beta, and Gamma from their fixed profile seeds. Scenario switching is runtime UI/API state, not an `.env` change.
 
 ## 4. Build and check the optimizer
 
@@ -100,7 +94,7 @@ Run all three algorithms directly:
 
 ```bash
 ./build/optimizer/sih-optimizer benchmark \
-  --data data/demo \
+  --data data/scenarios/scenario-alpha \
   --config config/optimizer.conf
 ```
 
@@ -137,15 +131,16 @@ The page should display three algorithm cards, the selected plan's four-week Gan
 
 ```bash
 curl http://localhost:8080/api/health
-curl http://localhost:8080/api/dataset
-curl http://localhost:8080/api/plans/greedy
-curl http://localhost:8080/api/benchmark
+curl http://localhost:8080/api/datasets
+curl 'http://localhost:8080/api/dataset?dataset_id=scenario-alpha'
+curl 'http://localhost:8080/api/plans/greedy?dataset_id=scenario-beta'
+curl -X POST -H 'Content-Type: application/json' -d '{"dataset_id":"scenario-gamma"}' http://localhost:8080/api/benchmark
 ```
 
 Expected health response:
 
 ```json
-{"horizon_days":7,"slot_minutes":15,"status":"ok"}
+{"horizon_days":28,"horizon_weeks":4,"slot_minutes":15,"status":"ok"}
 ```
 
 ## 6. Local run with PostgreSQL
@@ -405,7 +400,7 @@ make build-portable
 | `DATABASE_URL` | unset | Enables PostgreSQL benchmark persistence |
 | `API_ADDR` | `:8080` | Go listen address |
 | `OPTIMIZER_BIN` | `../build/optimizer/sih-optimizer` from `backend/` | C++ executable |
-| `DATA_DIR` | `../data/demo` from `backend/` | Input CSV directory |
+| `DATA_ROOT` | `../data/scenarios` from `backend/` | Base directory containing the three stored scenarios; does not select one |
 | `OPTIMIZER_CONFIG` | `../config/optimizer.conf` from `backend/` | Objective configuration |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8080` | Browser-visible API base URL |
 | `SOLVER_TIME_LIMIT_SECONDS` | `10` in benchmark script | CP-SAT command time limit |
@@ -423,7 +418,7 @@ Copy `.env.example` to `.env`. The Makefile and development scripts load it auto
 make build-optimizer
 ```
 
-If Go is started outside `make api`, check that `OPTIMIZER_BIN`, `DATA_DIR`, and `OPTIMIZER_CONFIG` are correct relative to the current directory.
+If Go is started outside `make api`, check that `OPTIMIZER_BIN`, `DATA_ROOT`, and `OPTIMIZER_CONFIG` are correct relative to the current directory.
 
 ### Dashboard reports that the API is offline
 
@@ -447,7 +442,7 @@ This is expected fail-open behavior. Planning still works. Correct `DATABASE_URL
 
 ### Edited CSV data does not appear
 
-Each optimizer invocation reloads the dataset. Click **Run benchmark** or reload the page, and verify `DATA_DIR` points to the directory you edited.
+Each optimizer invocation reloads the selected stored scenario. Click **Run benchmark** and verify `DATA_ROOT` contains the scenario directory you edited.
 
 ### CP-SAT still reports `native_cp_sat: false`
 

@@ -44,11 +44,10 @@ func main() {
 	}
 	runner := optimizer.CommandRunner{
 		Binary:    env("OPTIMIZER_BIN", "../build/optimizer/sih-optimizer"),
-		DataDir:   env("DATA_DIR", "../data/demo"),
 		Config:    env("OPTIMIZER_CONFIG", "../config/optimizer.conf"),
 		TimeLimit: envSeconds("SOLVER_TIME_LIMIT_SECONDS", 15),
 	}
 	address := env("API_ADDR", ":8080")
 	log.Printf("SIH planner API listening on %s", address)
-	log.Fatal(http.ListenAndServe(address, httpapi.New(runner, benchmarkStore, runner.DataDir)))
+	log.Fatal(http.ListenAndServe(address, httpapi.New(runner, benchmarkStore, env("DATA_ROOT", "../data/scenarios"))))
 }

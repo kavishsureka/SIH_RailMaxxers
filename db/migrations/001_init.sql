@@ -64,6 +64,7 @@ CREATE TABLE task_dependencies (
 
 CREATE TABLE plans (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  dataset_id text NOT NULL,
   horizon_start timestamptz NOT NULL,
   horizon_end timestamptz NOT NULL,
   algorithm algorithm NOT NULL,
@@ -94,6 +95,7 @@ CREATE TABLE block_tasks (
 
 CREATE TABLE benchmark_runs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  dataset_id text NOT NULL,
   result jsonb NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now()
 );

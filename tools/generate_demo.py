@@ -27,6 +27,7 @@ def main() -> None:
     parser.add_argument("--corridors", type=int, default=10)
     parser.add_argument("--tasks", type=int, default=120)
     parser.add_argument("--trains-per-day", type=int, default=120)
+    parser.add_argument("--profile", choices=["alpha", "beta", "gamma"], default="alpha")
     parser.add_argument("--trains", type=int, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.trains is not None:
@@ -44,7 +45,12 @@ def main() -> None:
     corridors = [[f"C{i + 1}", corridor_names[i]] for i in range(args.corridors)]
     write(out / "corridors.csv", ["id", "name"], corridors)
 
-    departments = ["ENGINEERING", "ST", "TRD"]
+    department_cycles = {
+        "alpha": ["ENGINEERING", "ENGINEERING", "ST", "TRD"],
+        "beta": ["ST", "TRD", "ST", "TRD", "ENGINEERING"],
+        "gamma": ["ENGINEERING", "ST", "TRD"],
+    }
+    departments = department_cycles[args.profile]
     task_types = {
         "ENGINEERING": ["TRACK_REPAIR", "RAIL_GRINDING", "HEAVY_EARTHWORK"],
         "ST": ["SIGNAL_TEST", "TRACK_CIRCUIT_CALIBRATION", "POINT_MACHINE_SERVICE"],
@@ -52,7 +58,8 @@ def main() -> None:
     }
     critical_count = min(args.tasks, max(12, round(args.tasks * 0.10)))
     high_count = min(args.tasks - critical_count, max(10, round(args.tasks * 0.10)))
-    power_remaining = min(18, max(15, round(args.tasks * 0.15)))
+    power_ratio = {"alpha": 0.12, "beta": 0.22, "gamma": 0.25}[args.profile]
+    power_remaining = max(1, round(args.tasks * power_ratio))
     tasks: list[list[object]] = []
     task_meta: list[dict[str, int | str]] = []
     for i in range(args.tasks):
@@ -130,7 +137,8 @@ def main() -> None:
             ])
     write(out / "availability.csv", ["corridor_id", "start_slot", "end_slot"], availability)
 
-    dependency_target = min(15, max(10, args.tasks // 10)) if args.tasks >= 20 else 0
+    dependency_ratio = {"alpha": 0.08, "beta": 0.10, "gamma": 0.15}[args.profile]
+    dependency_target = round(args.tasks * dependency_ratio) if args.tasks >= 20 else 0
     dependencies: list[list[object]] = []
     for base_round in range(0, max(0, args.tasks // len(corridors) - 1)):
         if base_round % 4 == 3:
@@ -160,7 +168,7 @@ def main() -> None:
     print(
         f"generated 28-day dataset: {len(corridors)} corridors, {len(tasks)} tasks, "
         f"{len(trains)} all-electric movements ({args.trains_per_day}/day), "
-        f"{len(dependencies)} dependencies in {out}"
+        f"{len(dependencies)} dependencies, {args.profile} profile in {out}"
     )
 
 

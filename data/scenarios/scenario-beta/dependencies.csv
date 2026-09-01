@@ -1,0 +1,13 @@
+predecessor_task_id,successor_task_id,min_lag_slots
+T001,T011,1
+T002,T012,1
+T003,T013,1
+T004,T014,1
+T005,T015,1
+T006,T016,1
+T007,T017,0
+T008,T018,1
+T009,T019,1
+T010,T020,1
+T011,T021,2
+T012,T022,1

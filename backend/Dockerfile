@@ -12,9 +12,8 @@ FROM gcr.io/distroless/base-debian12:nonroot
 WORKDIR /app
 COPY --from=build /out/sih-api /app/sih-api
 COPY --from=build /out/sih-optimizer /app/sih-optimizer
-COPY data/demo /app/data/demo
+COPY data/scenarios /app/data/scenarios
 COPY config /app/config
-ENV OPTIMIZER_BIN=/app/sih-optimizer DATA_DIR=/app/data/demo OPTIMIZER_CONFIG=/app/config/optimizer.conf API_ADDR=:8080
+ENV OPTIMIZER_BIN=/app/sih-optimizer DATA_ROOT=/app/data/scenarios OPTIMIZER_CONFIG=/app/config/optimizer.conf API_ADDR=:8080
 EXPOSE 8080
 ENTRYPOINT ["/app/sih-api"]
-

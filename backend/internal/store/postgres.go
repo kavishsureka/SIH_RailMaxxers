@@ -23,12 +23,11 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 
 func (s *Store) Close() { s.pool.Close() }
 
-func (s *Store) SaveBenchmark(ctx context.Context, payload []byte) error {
+func (s *Store) SaveBenchmark(ctx context.Context, datasetID string, payload []byte) error {
 	var document any
 	if err := json.Unmarshal(payload, &document); err != nil {
 		return err
 	}
-	_, err := s.pool.Exec(ctx, `INSERT INTO benchmark_runs (result) VALUES ($1)`, document)
+	_, err := s.pool.Exec(ctx, `INSERT INTO benchmark_runs (dataset_id, result) VALUES ($1, $2)`, datasetID, document)
 	return err
 }
-

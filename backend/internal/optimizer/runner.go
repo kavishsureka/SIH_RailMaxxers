@@ -9,6 +9,7 @@ import (
 )
 
 type Plan struct {
+	DatasetID       string          `json:"dataset_id"`
 	Algorithm       string          `json:"algorithm"`
 	SolverStatus    string          `json:"solver_status"`
 	PreprocessingMS float64         `json:"preprocessing_ms"`
@@ -22,6 +23,7 @@ type Plan struct {
 }
 
 type Benchmark struct {
+	DatasetID    string `json:"dataset_id"`
 	HorizonDays  int    `json:"horizon_days"`
 	HorizonWeeks int    `json:"horizon_weeks"`
 	HorizonSlots int    `json:"horizon_slots"`
@@ -30,41 +32,51 @@ type Benchmark struct {
 }
 
 type Runner interface {
-	Benchmark(context.Context) ([]byte, error)
-	Plan(context.Context, string) ([]byte, error)
+	Benchmark(context.Context, string, string) ([]byte, error)
+	Plan(context.Context, string, string, string) ([]byte, error)
 }
 
 type CommandRunner struct {
 	Binary    string
-	DataDir   string
 	Config    string
 	TimeLimit time.Duration
 }
 
-func (r CommandRunner) run(ctx context.Context, command string) ([]byte, error) {
+func (r CommandRunner) run(ctx context.Context, command, dataDir, datasetID string) ([]byte, error) {
 	timeout := r.TimeLimit + 5*time.Second
 	if timeout <= 5*time.Second {
 		timeout = 15 * time.Second
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	args := []string{command, "--data", r.DataDir, "--config", r.Config,
+	args := []string{command, "--data", dataDir, "--config", r.Config,
 		"--time-limit", fmt.Sprintf("%d", max(1, int(r.TimeLimit.Seconds())))}
 	out, err := exec.CommandContext(ctx, r.Binary, args...).CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("optimizer failed: %w: %s", err, out)
 	}
-	if !json.Valid(out) {
-		return nil, fmt.Errorf("optimizer returned invalid JSON")
+	var document map[string]any
+	if err := json.Unmarshal(out, &document); err != nil {
+		return nil, fmt.Errorf("optimizer returned invalid JSON: %w", err)
 	}
-	return out, nil
+	document["dataset_id"] = datasetID
+	if plans, ok := document["plans"].([]any); ok {
+		for _, value := range plans {
+			if plan, ok := value.(map[string]any); ok {
+				plan["dataset_id"] = datasetID
+			}
+		}
+	}
+	return json.Marshal(document)
 }
 
-func (r CommandRunner) Benchmark(ctx context.Context) ([]byte, error) { return r.run(ctx, "benchmark") }
+func (r CommandRunner) Benchmark(ctx context.Context, dataDir, datasetID string) ([]byte, error) {
+	return r.run(ctx, "benchmark", dataDir, datasetID)
+}
 
-func (r CommandRunner) Plan(ctx context.Context, algorithm string) ([]byte, error) {
+func (r CommandRunner) Plan(ctx context.Context, algorithm, dataDir, datasetID string) ([]byte, error) {
 	if algorithm != "independent" && algorithm != "greedy" && algorithm != "cp-sat" {
 		return nil, fmt.Errorf("unknown algorithm %q", algorithm)
 	}
-	return r.run(ctx, algorithm)
+	return r.run(ctx, algorithm, dataDir, datasetID)
 }

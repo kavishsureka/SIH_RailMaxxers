@@ -2,7 +2,7 @@
 
 RailBlock is a 28-day railway maintenance block planner for Engineering, S&T, and TRD. It compares an independent departmental baseline, a coordinated greedy scheduler, and a full-horizon OR-Tools CP-SAT model through one independent validator and one KPI contract.
 
-The live-demo scenario contains 10 corridors, 120 monthly tasks, and 120 synthetic train movements per day across four weeks. Every train is electric; there is no traction or diesel field anywhere in the data contract or database schema. Generated 100-, 250-, and 500-task benchmark presets are available under `data/benchmarks/`.
+The live demo includes three deterministic, medium-sized monthly scenarios. Alpha is the polished default, Beta increases train density and S&T/TRD interaction, and Gamma emphasizes dependencies, power blocks, and consolidation. Every train is electric; there is no traction or diesel field anywhere in the data contract or database schema.
 
 ## Architecture
 
@@ -57,7 +57,7 @@ docker compose up --build
 
 ```bash
 # Three-algorithm JSON benchmark
-./build/optimizer/sih-optimizer benchmark --data data/demo --config config/optimizer.conf
+./build/optimizer/sih-optimizer benchmark --data data/scenarios/scenario-alpha --config config/optimizer.conf
 
 # JSON + flat CSV benchmark artifacts
 make benchmark
@@ -72,9 +72,10 @@ make generate-presets
 ## REST API
 
 - `GET /api/health` — service and horizon contract
-- `GET /api/dataset` — current synthetic scenario
-- `GET|POST /api/benchmark` — run all algorithms and optionally persist the result
-- `GET /api/plans/{independent|greedy|cp-sat}` — run one algorithm
+- `GET /api/datasets` — list the three stored scenarios and metadata
+- `GET /api/dataset?dataset_id=scenario-alpha` — load one stored scenario
+- `POST /api/benchmark` with `{"dataset_id":"scenario-alpha"}` — run all algorithms on that same scenario
+- `GET /api/plans/{independent|greedy|cp-sat}?dataset_id=scenario-alpha` — run one algorithm
 
 Plan responses include stable block IDs, task placements, and compact per-task candidate traces. The trace labels selected, feasible, hard-train-conflicting, and too-short intervals and reports measured train cost, added downtime, and compatible-block reuse for each evaluated window.
 
@@ -109,7 +110,7 @@ There is no unscheduled-task term because unscheduling is infeasible. Objective 
 ```text
 backend/              Go REST API and PostgreSQL repository
 config/               objective, priority, and train-impact policy
-data/demo/            deterministic hackathon dataset
+data/scenarios/       three deterministic demo scenarios
 db/migrations/        minimal internal-round PostgreSQL schema
 frontend/             Next.js comparison dashboard and four-week Gantt
 optimizer/            C++ schedulers, objective, block builder, validator

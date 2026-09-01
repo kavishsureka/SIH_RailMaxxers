@@ -18,6 +18,6 @@ endif()
 enable_testing()
 add_test(NAME optimizer_smoke
   COMMAND sih-optimizer benchmark
-    --data ${CMAKE_SOURCE_DIR}/data/demo
+    --data ${CMAKE_SOURCE_DIR}/data/scenarios/scenario-alpha
     --config ${CMAKE_SOURCE_DIR}/config/optimizer.conf)
 add_test(NAME optimizer_unit COMMAND sih-optimizer-tests)

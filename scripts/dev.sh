@@ -13,7 +13,7 @@ source "$ROOT_DIR/.env"
 set +a
 
 export OPTIMIZER_BIN="$ROOT_DIR/build/optimizer/sih-optimizer"
-export DATA_DIR="$ROOT_DIR/data/demo"
+export DATA_ROOT="$ROOT_DIR/data/scenarios"
 export OPTIMIZER_CONFIG="$ROOT_DIR/config/optimizer.conf"
 
 cleanup() {

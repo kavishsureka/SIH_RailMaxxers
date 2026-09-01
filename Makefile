@@ -24,7 +24,9 @@ setup-ortools: env
 	bash scripts/setup-ortools.sh
 
 generate:
-	python3 tools/generate_demo.py --output data/demo --corridors 10 --tasks 120 --trains-per-day 120
+	python3 tools/generate_demo.py --output data/scenarios/scenario-alpha --profile alpha --seed 26027 --corridors 10 --tasks 110 --trains-per-day 105
+	python3 tools/generate_demo.py --output data/scenarios/scenario-beta --profile beta --seed 26127 --corridors 10 --tasks 124 --trains-per-day 130
+	python3 tools/generate_demo.py --output data/scenarios/scenario-gamma --profile gamma --seed 26227 --corridors 10 --tasks 120 --trains-per-day 115
 
 generate-presets:
 	python3 tools/generate_demo.py --output data/benchmarks/100 --seed 26100 --corridors 10 --tasks 100 --trains-per-day 100
@@ -49,13 +51,13 @@ test: build-optimizer
 	cd frontend && npm run lint
 
 verify-native: build-optimizer
-	python3 tools/verify_native_cp_sat.py --binary "$(OPTIMIZER_BIN_ABS)" --data "$(ROOT_DIR)/data/demo" --config "$(ROOT_DIR)/config/optimizer.conf" --time-limit "$(SOLVER_TIME_LIMIT_SECONDS)"
+	python3 tools/verify_native_cp_sat.py --binary "$(OPTIMIZER_BIN_ABS)" --data "$(ROOT_DIR)/data/scenarios/scenario-alpha" --config "$(ROOT_DIR)/config/optimizer.conf" --time-limit "$(SOLVER_TIME_LIMIT_SECONDS)"
 
 benchmark: build-optimizer
 	./scripts/benchmark.sh
 
 api: build-optimizer
-	cd backend && OPTIMIZER_BIN="$(OPTIMIZER_BIN_ABS)" DATA_DIR="$(ROOT_DIR)/data/demo" OPTIMIZER_CONFIG="$(ROOT_DIR)/config/optimizer.conf" go run ./cmd/api
+	cd backend && OPTIMIZER_BIN="$(OPTIMIZER_BIN_ABS)" DATA_ROOT="$(ROOT_DIR)/data/scenarios" OPTIMIZER_CONFIG="$(ROOT_DIR)/config/optimizer.conf" go run ./cmd/api
 
 web:
 	cd frontend && npm run dev
