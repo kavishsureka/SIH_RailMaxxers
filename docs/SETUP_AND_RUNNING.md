@@ -1,243 +1,169 @@
-# Setup, running, and testing guide
+# Setup, running, testing, and troubleshooting
 
-This guide is for teammates cloning RailBlock from GitHub for the first time. It covers three supported workflows:
+RailBlock supports local development with or without PostgreSQL and a full Docker Compose stack. Local native OR-Tools is the correct path for solver demonstrations; the API container uses the labelled portable fallback.
 
-1. local development without PostgreSQL;
-2. local development with PostgreSQL persistence;
-3. the complete stack through Docker Compose.
+## Requirements
 
-The fastest development path is **local without PostgreSQL**. PostgreSQL currently stores benchmark run documents, but it is not required for dataset loading, optimization, validation, the REST API, or the dashboard.
+| Tool | Version used/required |
+|---|---|
+| CMake | 3.20+ |
+| C++ compiler | C++20 capable |
+| Go | 1.23+ (`backend/go.mod`) |
+| Node.js | 22+ |
+| npm | lockfile installation with `npm ci` |
+| Python | Python 3 |
+| PostgreSQL | optional; Compose uses 17 |
+| Docker | optional |
 
-## 1. Software requirements
+Windows developers should use WSL 2 for native development.
 
-| Tool | Version | Purpose |
-|---|---:|---|
-| Git | Current stable | Clone and collaborate through GitHub |
-| CMake | 3.20+ | Configure the C++ optimizer build |
-| C++ compiler | C++20 capable | Compile with `clang++` or `g++` |
-| Go | 1.23+ | Build and run the REST API |
-| Node.js | 22+ | Build and run Next.js |
-| npm | Bundled with Node.js | Install frontend packages |
-| Python | 3.10+ | Generate CSV data and benchmark reports |
-| PostgreSQL | 15+; Compose uses 17 | Optional persistence |
-| Docker | Current stable | Optional container setup |
-
-Windows teammates should use WSL2 for native development. Docker Desktop is also supported. Avoid mixing a Windows-built optimizer with a backend running inside WSL because executable paths differ.
-
-Verify the native toolchain:
+## One-time local setup
 
 ```bash
-git --version
-cmake --version
-c++ --version
-go version
-node --version
-npm --version
-python3 --version
-```
-
-For Docker workflows, also verify:
-
-```bash
-docker --version
-docker compose version
-```
-
-## 2. Clone and install dependencies
-
-```bash
-git clone <YOUR_GITHUB_REPOSITORY_URL>
-cd <CLONED_REPOSITORY_DIRECTORY>
-```
-
-Create your personal configuration and run the one-time native setup:
-
-```bash
+git clone <repository-url>
+cd <repository-directory>
 cp .env.example .env
 make setup
 ```
 
-`make setup` installs locked frontend and Go dependencies, downloads the pinned OR-Tools C++ distribution to the ignored `.deps/` directory, builds the native optimizer, and verifies that CP-SAT reports `native_cp_sat: true` with a valid independent-validator result.
+`make setup` creates `.env` if needed, installs frontend/Go dependencies, downloads pinned OR-Tools 9.12 to `.deps/or-tools`, builds the native optimizer, and runs `tools/verify_native_cp_sat.py`. Verification requires `native_cp_sat: true` and an independently valid CP-SAT result.
 
-For the supported platform list and teammate-oriented checklist, see `docs/NATIVE_CPSAT_TEAM_SETUP.md`.
+Important defaults in `.env.example`:
 
-```bash
-make install-deps
+```dotenv
+DATABASE_URL=
+API_ADDR=:8080
+OPTIMIZER_BIN=../build/optimizer/sih-optimizer
+DATA_ROOT=../data/scenarios
+OPTIMIZER_CONFIG=../config/optimizer.conf
+NEXT_PUBLIC_API_URL=http://localhost:8080
+ORTOOLS_ROOT=.deps/or-tools
+ORTOOLS_VERSION=9.12
+SOLVER_TIME_LIMIT_SECONDS=15
+CMAKE_BUILD_PARALLEL_LEVEL=4
 ```
 
-## 3. Demo dataset
+`DATA_ROOT` is only a base directory. The UI/API supplies `dataset_id` at runtime; never switch Alpha/Beta/Gamma by editing `.env`.
 
-The repository already contains three deterministic inputs under `data/scenarios/`. Regeneration is optional.
+## Stored datasets
+
+The committed live scenarios are:
+
+```text
+data/scenarios/scenario-alpha   110 tasks, 2,940 trains
+data/scenarios/scenario-beta    124 tasks, 3,640 trains
+data/scenarios/scenario-gamma   120 tasks, 3,220 trains
+```
+
+Regenerate them deterministically:
 
 ```bash
 make generate
 ```
 
-`make generate` recreates Alpha, Beta, and Gamma from their fixed profile seeds. Scenario switching is runtime UI/API state, not an `.env` change.
+The exact profile, seed, corridor/task/train counts are in the three recipes under `Makefile: generate`. Separate 100/250/500-task offline presets are created with `make generate-presets`; they are not UI options.
 
-## 4. Build and check the optimizer
-
-From the repository root:
+## Build and direct CLI use
 
 ```bash
 make build-optimizer
 make verify-native
 ```
 
-The executable is created at:
-
-```text
-build/optimizer/sih-optimizer
-```
-
-Run all three algorithms directly:
+The native executable is `build/optimizer/sih-optimizer`.
 
 ```bash
 ./build/optimizer/sih-optimizer benchmark \
   --data data/scenarios/scenario-alpha \
+  --config config/optimizer.conf \
+  --time-limit 15
+```
+
+Commands are `independent`, `greedy`, `cp-sat`, and `benchmark`. The result reports solver status, native/fallback identity, validation, metrics, placements, blocks, task traces, and preprocessing/algorithm/total runtimes.
+
+For troubleshooting without OR-Tools:
+
+```bash
+make build-portable
+./build-portable/optimizer/sih-optimizer cp-sat \
+  --data data/scenarios/scenario-alpha \
   --config config/optimizer.conf
 ```
 
-The command prints JSON containing Independent, Greedy, and CP-SAT plan results. Inspect `native_cp_sat` in the CP-SAT result:
+That result says `FALLBACK_FEASIBLE` and `native_cp_sat: false`; do not present it as native CP-SAT.
 
-- `true` is required for the normal native build;
-- `false` appears only in the explicit `make build-portable` troubleshooting build.
+## Local development without PostgreSQL
 
-## 5. Local run without PostgreSQL
-
-This is the recommended everyday development setup. Benchmark results reach the dashboard but are not saved after the API process stops.
-
-Leave `DATABASE_URL=` blank in `.env`, then start both services:
+Leave `DATABASE_URL=` blank and run:
 
 ```bash
 make dev
 ```
 
-For separate logs, use two terminals:
+Open `http://localhost:3000`; the API is at `http://localhost:8080`. For separate logs:
 
 ```bash
-# Terminal 1
+# terminal 1
 make api
 
-# Terminal 2
+# terminal 2
 make web
 ```
 
-The API runs at `http://localhost:8080`; open the dashboard at `http://localhost:3000`.
+Planning, validation, dataset switching, and benchmark comparison work without a database. Only benchmark history persistence is absent.
 
-The page should display three algorithm cards, the selected plan's four-week Gantt, completed-workload totals, KPI values, solver status, runtime breakdown, and validator status.
-
-### Check the API manually
+## API checks
 
 ```bash
 curl http://localhost:8080/api/health
 curl http://localhost:8080/api/datasets
 curl 'http://localhost:8080/api/dataset?dataset_id=scenario-alpha'
 curl 'http://localhost:8080/api/plans/greedy?dataset_id=scenario-beta'
-curl -X POST -H 'Content-Type: application/json' -d '{"dataset_id":"scenario-gamma"}' http://localhost:8080/api/benchmark
+curl 'http://localhost:8080/api/benchmark?dataset_id=scenario-gamma'
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"dataset_id":"scenario-gamma"}' \
+  http://localhost:8080/api/benchmark
 ```
 
-Expected health response:
+Expected health fields are `status: ok`, `slot_minutes: 15`, `horizon_days: 28`, and `horizon_weeks: 4`. Missing IDs default to Alpha; unknown IDs return HTTP 400.
 
-```json
-{"horizon_days":28,"horizon_weeks":4,"slot_minutes":15,"status":"ok"}
-```
+The Go process timeout is the solver time limit plus five seconds. If no valid positive duration reaches `CommandRunner`, its defensive process timeout is 15 seconds.
 
-## 6. Local run with PostgreSQL
+## Local PostgreSQL
 
-When `DATABASE_URL` is valid, every `/api/benchmark` result is inserted into `benchmark_runs.result` as JSONB. If PostgreSQL cannot be reached, the API logs a warning and deliberately continues without persistence.
-
-### Option A: PostgreSQL through Docker, app locally
-
-This is the easiest database-enabled developer setup.
+Start only the Compose database:
 
 ```bash
-docker compose up -d postgres
-docker compose ps
+make db-up
 ```
 
-Wait until `postgres` is healthy. Development credentials are:
+Set:
 
-```text
-Host:     localhost
-Port:     5432
-Database: railblock
-User:     railblock
-Password: railblock
+```dotenv
+DATABASE_URL=postgres://railblock:railblock@localhost:5432/railblock?sslmode=disable
 ```
 
-The migration runs automatically only when the PostgreSQL volume is initialized for the first time.
+Then restart `make dev`. Each benchmark request inserts its selected `dataset_id` and full JSON into `benchmark_runs`. No other normalized planning table is written by current Go code.
 
-Start the API with persistence:
+For a locally installed PostgreSQL server, create the database/user and apply both migrations in order:
 
 ```bash
-export DATABASE_URL='postgres://railblock:railblock@localhost:5432/railblock?sslmode=disable'
-make api
+psql "$DATABASE_URL" -f db/migrations/001_init.sql
+psql "$DATABASE_URL" -f db/migrations/002_dataset_ids.sql
 ```
 
-In another terminal:
+Compose mounts the migration directory into `/docker-entrypoint-initdb.d`; scripts run only when its volume is first initialized.
+
+Inspect saved runs:
 
 ```bash
-make web
+docker compose exec postgres psql -U railblock -d railblock \
+  -c 'SELECT id, dataset_id, created_at FROM benchmark_runs ORDER BY created_at DESC LIMIT 5;'
 ```
 
-Trigger a benchmark from the UI or with:
+`docker compose down -v` permanently deletes the development database volume; use it only when a reset is intentional.
 
-```bash
-curl http://localhost:8080/api/benchmark
-```
-
-Confirm persistence:
-
-```bash
-docker compose exec postgres \
-  psql -U railblock -d railblock \
-  -c 'SELECT id, created_at FROM benchmark_runs ORDER BY created_at DESC LIMIT 5;'
-```
-
-Stop the database without deleting its volume:
-
-```bash
-docker compose stop postgres
-```
-
-### Option B: locally installed PostgreSQL
-
-Start the local PostgreSQL service. As a PostgreSQL administrator, create the development user and database once:
-
-```sql
-CREATE USER railblock WITH PASSWORD 'railblock';
-CREATE DATABASE railblock OWNER railblock;
-```
-
-Apply the initial schema from the repository root:
-
-```bash
-psql 'postgres://railblock:railblock@localhost:5432/railblock?sslmode=disable' \
-  -f db/migrations/001_init.sql
-```
-
-Start the backend:
-
-```bash
-export DATABASE_URL='postgres://railblock:railblock@localhost:5432/railblock?sslmode=disable'
-make api
-```
-
-The initial migration creates enum types and is not intended to be repeatedly applied to the same database. Introduce a migration tool before adding multiple production migrations.
-
-### Reset the Docker development database
-
-The next command permanently deletes the local Compose database volume. Use it only when a clean database is intentional:
-
-```bash
-docker compose down -v
-docker compose up -d postgres
-```
-
-## 7. Complete Docker Compose stack
-
-Run PostgreSQL, API/optimizer, and frontend together:
+## Full Docker stack
 
 ```bash
 docker compose up --build
@@ -245,128 +171,70 @@ docker compose up --build
 
 | Service | Address |
 |---|---|
-| Frontend | `http://localhost:3000` |
-| REST API | `http://localhost:8080` |
+| Next.js | `http://localhost:3000` |
+| Go API | `http://localhost:8080` |
 | PostgreSQL | `localhost:5432` |
 
-Background mode and logs:
+The API image compiles without OR-Tools and exposes the portable fallback. Use local `make build-optimizer`/`make dev` for a native CP-SAT demo.
 
-```bash
-docker compose up --build -d
-docker compose logs -f api web
-```
-
-Stop without deleting database data:
-
-```bash
-docker compose down
-```
-
-The current backend container compiles the portable optimizer. Native OR-Tools is not bundled into the container image.
-
-## 8. Frontend development and testing
-
-### Development server
-
-Start the API first, then:
-
-```bash
-cd frontend
-npm run dev
-```
-
-The dashboard reads `NEXT_PUBLIC_API_URL` and defaults to `http://localhost:8080`.
-
-To use another backend address:
-
-```bash
-NEXT_PUBLIC_API_URL=http://localhost:9090 npm run dev
-```
-
-This variable is exposed to the browser. Never place passwords, database URLs, API keys, or secrets in it.
-
-### Type-check
-
-```bash
-cd frontend
-npm run lint
-```
-
-For this prototype, `lint` runs strict TypeScript checking without emitting files.
-
-### Production build test
-
-```bash
-cd frontend
-npm run build
-```
-
-The build must finish without TypeScript or bundling errors. Docker uses the resulting standalone Next.js output.
-
-### Manual UI acceptance check
-
-With both services running:
-
-1. open `http://localhost:3000`;
-2. confirm all three algorithm cards appear;
-3. click each card and confirm the Gantt heading changes;
-4. confirm runtime appears for every algorithm;
-5. confirm the validator reports success or a specific violation;
-6. click **Run benchmark** and confirm values refresh;
-7. resize below 900 px and confirm cards stack vertically;
-8. check the browser console for errors.
-
-There is no automated browser suite yet. Add Playwright when the UI gains more interactive workflows.
-
-## 9. Backend and optimizer tests
-
-Run the main repository test target:
+## Tests and benchmark artifacts
 
 ```bash
 make test
 ```
 
-It performs a CMake build, the CTest optimizer smoke benchmark, and Go HTTP tests.
+This rebuilds native C++, runs CTest (`optimizer_smoke`, `optimizer_unit`), runs `go test ./...`, and runs the frontend TypeScript check (`npm run lint` → `tsc --noEmit`). It does not run `next build` or browser automation.
 
-Run components separately when debugging:
+Useful individual checks:
 
 ```bash
 ctest --test-dir build --output-on-failure
+cd backend && go test ./...
+cd frontend && npm run lint
+cd frontend && npm run build
 ```
 
-```bash
-cd backend
-go test ./...
-```
-
-```bash
-cd frontend
-npm run lint
-npm run build
-```
-
-## 10. Benchmark files
+Run the checked-in report pipeline:
 
 ```bash
 make benchmark
-```
-
-Generated outputs:
-
-```text
-benchmark-results/latest.json
-benchmark-results/latest.csv
-```
-
-`benchmark-results/` is ignored by Git. Override the solver limit for this pipeline with:
-
-```bash
 SOLVER_TIME_LIMIT_SECONDS=30 make benchmark
 ```
 
-## 11. Native OR-Tools CP-SAT
+It always uses `scenario-alpha` and writes `benchmark-results/latest.json` and `latest.csv`. The directory is ignored by Git.
 
-Native CP-SAT is the default. The automated path is:
+## UI acceptance checklist
+
+1. Catalog loads Alpha/Beta/Gamma and Alpha is selected by default.
+2. Switching scenarios refreshes both benchmark and raw dataset and keeps IDs consistent.
+3. Overview shows the CP-SAT recommendation and 28-day completion.
+4. Block Planner switches algorithm and week, filters corridor/department, and opens task/block drawers.
+5. Maintenance Tasks search/filters and task drawer work.
+6. Plan Verification separates solver status from validator PASS/FAIL.
+7. Benchmark shows all three plans, one dataset banner, weighted metrics, and all three runtime components.
+8. **Run benchmark** reruns the currently selected scenario.
+9. Browser console has no errors and narrow layout remains usable.
+
+There is no automated browser suite.
+
+## Tunable configuration
+
+| Value | Exact location | Effect |
+|---|---|---|
+| `wB,wD,wT,wL,wV` | `config/optimizer.conf`; loaded by `load_weights` | weighted objective |
+| CP-SAT limit | `SOLVER_TIME_LIMIT_SECONDS` / CLI `--time-limit` | solver time budget |
+| workers/seed | `solve_cp_sat` in `optimizer/src/engine.cpp` | fixed at 8 / 26027 |
+| candidate step | `candidate_starts` in `engine.cpp` | two slots (30 minutes) |
+| priority formula | `priority_score` in `engine.cpp` | heuristic ordering |
+| scenarios/seeds | `Makefile: generate` | stored demo shape |
+| generation distributions | `tools/generate_demo.py` | tasks/trains/windows/dependencies |
+| scenario allowlist | `datasetDefinitions` in `server.go` | API-visible datasets |
+
+`config/priority.conf` and `config/train-weights.conf` are not loaded at runtime.
+
+## Troubleshooting
+
+### OR-Tools is missing or native verification fails
 
 ```bash
 make setup-ortools
@@ -374,76 +242,41 @@ make build-optimizer
 make verify-native
 ```
 
-The dependency is installed locally at `.deps/or-tools`. CMake receives that location through `ortools_ROOT`; the machine does not need a global OR-Tools installation.
+Expected package file: `.deps/or-tools/lib/cmake/ortools/ortoolsConfig.cmake`.
 
-The manual equivalent is:
+### An interrupted dependency download exists
 
-```bash
-cmake -S . -B build -DSIH_WITH_ORTOOLS=ON \
-  -Dortools_ROOT="$PWD/.deps/or-tools" \
-  -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel 4
-```
+Move the incomplete `.deps/or-tools` directory out of the repository, then rerun `make setup-ortools`. The script will not overwrite it.
 
-The CP-SAT plan must report `"native_cp_sat": true`. See `optimizer/ORTOOLS.md` and `docs/NATIVE_CPSAT_TEAM_SETUP.md`.
+### macOS blocks downloaded OR-Tools libraries
 
-For a dependency-free diagnostic build only:
+Approve the trusted official archive in Privacy & Security, then restrict quarantine removal to the local dependency:
 
 ```bash
-make build-portable
+xattr -dr com.apple.quarantine .deps/or-tools
+make verify-native
 ```
 
-## 12. Environment variables
+### API says optimizer failed/not found
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `DATABASE_URL` | unset | Enables PostgreSQL benchmark persistence |
-| `API_ADDR` | `:8080` | Go listen address |
-| `OPTIMIZER_BIN` | `../build/optimizer/sih-optimizer` from `backend/` | C++ executable |
-| `DATA_ROOT` | `../data/scenarios` from `backend/` | Base directory containing the three stored scenarios; does not select one |
-| `OPTIMIZER_CONFIG` | `../config/optimizer.conf` from `backend/` | Objective configuration |
-| `NEXT_PUBLIC_API_URL` | `http://localhost:8080` | Browser-visible API base URL |
-| `SOLVER_TIME_LIMIT_SECONDS` | `10` in benchmark script | CP-SAT command time limit |
-| `ORTOOLS_ROOT` | `.deps/or-tools` | Local OR-Tools C++ distribution |
-| `ORTOOLS_VERSION` | `9.12` | Version pinned by the setup script |
-| `CMAKE_BUILD_PARALLEL_LEVEL` | `4` | Parallel C++ build jobs |
+Run `make build-optimizer`. If starting Go manually, verify paths are relative to `backend/`, or use the absolute exports in `scripts/dev.sh`.
 
-Copy `.env.example` to `.env`. The Makefile and development scripts load it automatically; `.env` is ignored by Git and must not be committed.
+### Dashboard says API offline
 
-## 13. Troubleshooting
+Check `/api/health`. If the API port changes, update `NEXT_PUBLIC_API_URL` and restart/rebuild Next.js because production builds embed it.
 
-### Optimizer executable not found
+### PostgreSQL warning but API starts
 
-```bash
-make build-optimizer
-```
+This is intentional fail-open behavior. Fix/clear `DATABASE_URL` and restart. Planning remains available.
 
-If Go is started outside `make api`, check that `OPTIMIZER_BIN`, `DATA_ROOT`, and `OPTIMIZER_CONFIG` are correct relative to the current directory.
+### Tables are missing
 
-### Dashboard reports that the API is offline
+Compose initialization only runs on an empty volume. Apply both migrations or intentionally recreate the development volume.
 
-```bash
-curl http://localhost:8080/api/health
-```
+### CSV edits are not visible
 
-If Go uses another port, restart the frontend with the matching `NEXT_PUBLIC_API_URL`. Production frontend builds embed this value and must be rebuilt after it changes.
+Verify the edited folder matches the selected `dataset_id`, then click **Run benchmark**. Each request reloads files; the database is not the input source.
 
-### Port already in use
+### CP-SAT reports `native_cp_sat: false`
 
-Stop the conflicting process or change the mapping. When changing the API port, update `NEXT_PUBLIC_API_URL`. When changing PostgreSQL's host port, update `DATABASE_URL`.
-
-### PostgreSQL connects but tables are missing
-
-Compose initialization runs only for a new empty volume. Apply `db/migrations/001_init.sql` manually or intentionally reset the development volume.
-
-### PostgreSQL warning appears but the API starts
-
-This is expected fail-open behavior. Planning still works. Correct `DATABASE_URL` and restart when persistence is required.
-
-### Edited CSV data does not appear
-
-Each optimizer invocation reloads the selected stored scenario. Click **Run benchmark** and verify `DATA_ROOT` contains the scenario directory you edited.
-
-### CP-SAT still reports `native_cp_sat: false`
-
-The API is using the default binary. Rebuild with `SIH_WITH_ORTOOLS=ON` and point `OPTIMIZER_BIN` at `build-ortools/optimizer/sih-optimizer`.
+You are using `build-portable` or the Docker API binary. Point `OPTIMIZER_BIN` to `build/optimizer/sih-optimizer` and run `make verify-native`.

@@ -2,6 +2,8 @@
 
 This is the shortest reliable path from a fresh clone to the working SIH planner. Native Google OR-Tools CP-SAT is the normal build; the portable fallback is only for troubleshooting.
 
+The native model solves one 2,688-slot (28-day) month and requires every selected-scenario task exactly once. Scenario selection is request-scoped; `DATA_ROOT` is a base directory, not an Alpha/Beta/Gamma switch.
+
 ## 1. Install the machine-level prerequisites
 
 Install these once:
@@ -153,7 +155,7 @@ make test            # C++, Go, and frontend checks
 make benchmark       # three algorithms; writes JSON and CSV reports
 ```
 
-Benchmark files are written under `benchmark-results/` and are ignored by Git. Runtime is recorded for Independent, Greedy, and CP-SAT.
+Benchmark files are written under `benchmark-results/` and are ignored by Git. The script uses `scenario-alpha`. Runtime is recorded as preprocessing, algorithm/solver, and total milliseconds for Independent, Greedy, and CP-SAT.
 
 The portable diagnostic build is separate and cannot overwrite the native binary:
 
@@ -206,6 +208,10 @@ Run `make install-deps`. This uses `npm ci`, so dependency versions match the lo
 ### PostgreSQL is unavailable
 
 Clear `DATABASE_URL` and restart `make dev`; the API intentionally supports database-free development.
+
+### Native locally, fallback in Docker
+
+This is expected. `backend/Dockerfile` compiles the dependency-free C++ branch and reports `native_cp_sat: false`. Use `make dev` with `build/optimizer/sih-optimizer` for the native judge/demo path.
 
 ## 8. Before opening a pull request
 

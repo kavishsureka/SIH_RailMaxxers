@@ -1,29 +1,48 @@
-# Prototype design notes
+# Implemented prototype design notes
 
-The two supplied SIH planning references were used as design input, then reduced to the smallest useful internal-hackathon path.
+This file records decisions visible in the current source, not a future architecture proposal.
 
-## Preserved from the references
+## Planning contract
 
-- coordination across Engineering, S&T, and TRD;
-- corridor availability, protected train movements, incompatibilities, power blocks, and task dependencies;
-- consolidation of compatible simultaneous work into a common corridor block;
-- independent baseline, coordinated greedy, advanced optimizer, independent validator, and KPI benchmark flow;
-- block count, infrastructure downtime, train impact, priority/overdue completion, and runtime reporting;
-- synthetic interactive scenario with 10 corridors, 120 tasks, and 120 movements per day over four weeks;
-- generated 100-, 250-, and 500-task benchmark presets.
+- One 28-day month contains 2,688 fifteen-minute slots.
+- Every task in the chosen monthly CSV dataset is compulsory and must be scheduled exactly once.
+- Engineering, S&T, and TRD work may share a corridor block when task types are compatible.
+- Every train is electric. No traction/diesel field exists.
+- `HARD` movements are forbidden; `SOFT` movements remain feasible and add impact when a block overlaps them.
+- `requires_power_block` is currently metadata. Power work uses the same implemented availability, HARD/SOFT, compatibility, dependency, and completion rules.
 
-## Agreed changes implemented
+## Shared algorithm contract
 
-- Go API and C++ optimizer are used from the start;
-- every train is electric, so there is no traction dimension; HARD movements are forbidden and SOFT movements remain feasible, including for power-block work;
-- the horizon is a transparent 2,688-slot grid: 28 days at fifteen minutes per slot;
-- all tasks are compulsory and must appear exactly once by month end;
-- candidate windows are shared by all algorithms and subtract merged HARD intervals only;
-- CP-SAT solves the complete month in one model rather than four sequential weekly solves;
-- optimization uses one configurable weighted objective rather than lexicographic stages;
-- runtime is mandatory for Independent, Greedy, and CP-SAT;
-- all three algorithms pass through the same validator and metric calculator.
+`generate_candidate_windows` in `optimizer/src/engine.cpp` is run and timed for Independent, Greedy, and CP-SAT. It intersects task and availability windows, uses the due slot as a hard latest end for critical work, subtracts merged HARD intervals, and drops short windows.
 
-## Deferred production scope
+All three algorithms pass through `finalize`, which derives blocks, builds compact task traces, invokes the validator, calculates common metrics/objective, and records `preprocessing_ms`, `algorithm_ms`, and `total_runtime_ms`.
 
-Authentication, organization hierarchy, resource/team calendars, Kafka, Redis, GIS, live railway system integration, probabilistic goods forecasting, real-time replanning, and monthly rolling plans are intentionally outside this prototype.
+The objective is a weighted sum, not lexicographic:
+
+```text
+wB*block_count + wD*downtime_minutes + wT*train_impact
++ wL*lateness_minutes + wV*deadline_violations
+```
+
+`config/optimizer.conf` currently sets `wB=400`, `wD=2`, `wT=25`, `wL=5`, and `wV=5000`. Unscheduled work is not a term because it violates the monthly contract.
+
+## Demo scenarios
+
+| Scenario | Seed | Tasks | Trains/day | Emphasis |
+|---|---:|---:|---:|---|
+| Alpha | 26027 | 110 | 105 | Engineering-heavy default |
+| Beta | 26127 | 124 | 130 | denser traffic; S&T/TRD-heavy |
+| Gamma | 26227 | 120 | 115 | balanced departments; more dependencies/power work |
+
+All have 10 corridors. The request `dataset_id` selects one directory at runtime; `.env` only supplies the base `DATA_ROOT`. The UI benchmarks all three algorithms on that same selected scenario. `make generate-presets` still creates separate 100/250/500-task offline scalability fixtures.
+
+## Runtime and persistence
+
+- Native OR-Tools is the default local build; the separately built fallback reports `native_cp_sat: false`.
+- Go owns HTTP, dataset resolution, subprocess timeout/JSON checks, and optional persistence—not scheduling.
+- PostgreSQL is optional. Current code writes only benchmark JSON even though migrations define normalized planning entities.
+- The five views and task/block drawers are colocated in `frontend/app/page.tsx` for prototype speed.
+
+## Deferred scope
+
+Authentication, organization hierarchy, crew/equipment capacity, detailed electrical isolation, Kafka, Redis, GIS, live integrations, stochastic forecasts, real-time replanning, rolling horizons, database ingestion, and browser automation remain outside the implementation.
