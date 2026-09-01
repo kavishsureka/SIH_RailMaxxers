@@ -1,0 +1,11 @@
+.DS_Store
+.env
+node_modules/
+.next/
+dist/
+build/
+coverage/
+work/
+benchmark-results/
+data/generated/
+*.log
