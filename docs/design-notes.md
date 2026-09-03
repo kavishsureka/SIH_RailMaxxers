@@ -22,9 +22,10 @@ The objective is a weighted sum, not lexicographic:
 ```text
 wB*block_count + wD*downtime_minutes + wT*train_impact
 + wL*lateness_minutes + wV*deadline_violations
++ wP*priority_weighted_delay_score_days
 ```
 
-`config/optimizer.conf` currently sets `wB=400`, `wD=2`, `wT=25`, `wL=5`, and `wV=5000`. Unscheduled work is not a term because it violates the monthly contract.
+`config/optimizer.conf` currently sets `wB=400`, `wD=2`, `wT=100`, `wL=5`, `wV=5000`, and `wP=1`. Unscheduled work is not a term because it violates the monthly contract. ML priority therefore affects timing through the score-day delay term, not task inclusion.
 
 ## Demo scenarios
 
@@ -38,6 +39,8 @@ All have 10 corridors. The request `dataset_id` selects one directory at runtime
 
 ## Runtime and persistence
 
+- Go runs one batch through the persisted `GradientBoostingRegressor` before invoking C++; all three algorithms consume the same temporary priority CSV.
+- The v1 model is a synthetic bootstrap-policy surrogate, not evidence learned from Indian Railways history. Safety and compulsory scheduling remain non-ML constraints.
 - Native OR-Tools is the default local build; the separately built fallback reports `native_cp_sat: false`.
 - Go owns HTTP, dataset resolution, subprocess timeout/JSON checks, and optional persistence—not scheduling.
 - PostgreSQL is optional. Current code writes only benchmark JSON even though migrations define normalized planning entities.
@@ -45,4 +48,4 @@ All have 10 corridors. The request `dataset_id` selects one directory at runtime
 
 ## Deferred scope
 
-Authentication, organization hierarchy, crew/equipment capacity, detailed electrical isolation, Kafka, Redis, GIS, live integrations, stochastic forecasts, real-time replanning, rolling horizons, database ingestion, and browser automation remain outside the implementation.
+Authentication, organization hierarchy, crew/equipment capacity, detailed electrical isolation, Kafka, Redis, GIS, live integrations, stochastic forecasts, real-time replanning, rolling horizons, database ingestion, browser automation, real railway ML training data, calibration, and model monitoring remain outside the implementation.

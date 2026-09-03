@@ -1,6 +1,6 @@
 # RailBlock — SIH 26027 prototype
 
-RailBlock plans one compulsory month of railway maintenance for Engineering, S&T, and TRD. The implemented stack is Next.js 16, Go 1.23, C++20 with OR-Tools CP-SAT, and optional PostgreSQL 17.
+RailBlock plans one compulsory month of railway maintenance for Engineering, S&T, and TRD. The implemented stack is Next.js 16, Go 1.23, Python/scikit-learn, C++20 with OR-Tools CP-SAT, and optional PostgreSQL 17.
 
 The grid is fixed at 28 days × 96 fifteen-minute slots = 2,688 slots. Every task in the selected monthly dataset must be placed exactly once. All trains are electric; there is no diesel or traction field in the CSV, API, C++, or database contracts.
 
@@ -11,7 +11,10 @@ Next.js dashboard
         │ REST/JSON
         ▼
 Go API ───────── optional PostgreSQL benchmark persistence
-        │ child process + JSON stdout
+        │ one batch inference per selected scenario
+        ▼
+Persisted GradientBoostingRegressor
+        │ same priority CSV for all algorithms
         ▼
 C++ optimizer CLI
   ├─ shared candidate-window preprocessing
@@ -21,7 +24,9 @@ C++ optimizer CLI
   └─ shared block builder, validator, metrics, and traces
 ```
 
-C++ is the scheduling source of truth. Go resolves the selected scenario, invokes the CLI, checks its JSON, adds `dataset_id`, and optionally saves a benchmark document. The browser does not duplicate scheduling rules.
+C++ is the scheduling source of truth. Go resolves the selected scenario, asks the already-trained ML model for one batch of task scores, invokes the CLI with those scores, checks its JSON, adds model metadata and `dataset_id`, and optionally saves a benchmark document. The browser does not duplicate priority or scheduling rules. Mandatory and safety constraints remain outside ML.
+
+The committed v1 model is a prototype policy surrogate. It is trained on deterministic synthetic tasks whose offline labels come from the isolated bootstrap policy in `ml/src/labels.py`; this is not evidence of real Indian Railways behavior. With pilot data, the model would be retrained and recalibrated on historical planner decisions and outcomes while the `Task Features -> ML Priority -> Optimizer` boundary stays stable.
 
 ## Quick start
 
@@ -66,11 +71,12 @@ Preprocessing intersects task and corridor-availability windows, clips critical 
 The active objective in `config/optimizer.conf` is weighted, not lexicographic:
 
 ```text
-400*block_count + 2*downtime_minutes + 25*train_impact
+400*block_count + 2*downtime_minutes + 100*train_impact
 + 5*lateness_minutes + 5000*deadline_violations
++ 1*priority_weighted_delay_score_days
 ```
 
-There is no unscheduled-task term because unscheduling is invalid. Every plan reports `preprocessing_ms`, `algorithm_ms`, and `total_runtime_ms`; raw C++ JSON also emits the compatibility alias `runtime_ms`.
+There is no unscheduled-task term because unscheduling is invalid. `priority_weighted_delay_score_days` is rounded ML priority multiplied by whole/partial days after the task's earliest slot, so priority changes when work occurs rather than whether it occurs. Independent and Greedy order by the shared ML score; Greedy and CP-SAT also price this configured delay term. Every plan reports `preprocessing_ms`, `algorithm_ms`, and `total_runtime_ms`; raw C++ JSON also emits the compatibility alias `runtime_ms`.
 
 ## Independent validation
 
@@ -89,7 +95,7 @@ The validator checks returned placements rather than trusting solver status:
 
 ## Frontend
 
-`frontend/app/page.tsx` contains five views: Overview, Block Planner, Maintenance Tasks, Plan Verification, and Benchmark. The Block Planner has week/corridor/department filters and train, block, and task lanes. Task and block detail drawers expose candidate traces, validation evidence, and consolidated work. Changing scenario or clicking **Run benchmark** benchmarks all three algorithms on that selected dataset and reloads its CSV view.
+`frontend/app/page.tsx` contains five views: Overview, Block Planner, Maintenance Tasks, Plan Verification, and Benchmark. The Block Planner has week/corridor/department filters and train, block, and task lanes. Task detail shows the predicted score, source, and model version without invented per-feature explanations. Overview includes an AI Priority Model card populated from persisted metadata. Changing scenario or clicking **Run benchmark** benchmarks all three algorithms on that selected dataset and reloads its CSV view.
 
 ## REST API
 
@@ -102,12 +108,14 @@ The validator checks returned placements rather than trusting solver status:
 | `POST /api/benchmark` | JSON body `{"dataset_id":"scenario-alpha"}`; optionally persisted |
 | `GET /api/plans/{independent\|greedy\|cp-sat}?dataset_id=scenario-alpha` | one finalized plan |
 
-Unknown dataset IDs return HTTP 400. Go adds `dataset_id` to the benchmark and each nested plan.
+Unknown dataset IDs return HTTP 400. Go adds `dataset_id` to the benchmark and each nested plan. Benchmark and plan responses also expose `priority_model`, `task_priorities`, `priority_source`, and `priority_model_version`; the metadata and metrics are read from the persisted model artifact.
 
 ## Commands and documentation
 
 ```bash
 make generate          # reproduce Alpha/Beta/Gamma
+make train-ml          # retrain from ml/config/model.json
+make test-ml           # ML labels/features/training/inference checks
 make build-optimizer   # native OR-Tools build
 make verify-native     # require native_cp_sat=true and validator PASS
 make test              # CTest, Go tests, TypeScript check
@@ -115,7 +123,12 @@ make benchmark         # scenario-alpha to JSON + CSV
 make build-portable    # separate troubleshooting fallback
 ```
 
+Model hyperparameters and the random seed are in `ml/config/model.json`. Scheduling objective weights, including `wP`, are in `config/optimizer.conf`. See [`ml/README.md`](ml/README.md) for exact generation, training, inference, and evaluation commands.
+
 - [`docs/IMPLEMENTATION_GUIDE.md`](docs/IMPLEMENTATION_GUIDE.md) — detailed modules, schemas, flows, tuning, and viva mental model.
+- [`docs/SOLVER_AND_OPTIMIZATION.md`](docs/SOLVER_AND_OPTIMIZATION.md) — candidate domains, all three algorithms, CP-SAT variables/constraints, objective, extraction, validation, and runtimes.
+- [`docs/DATA_SCHEMA_AND_PREPROCESSING.md`](docs/DATA_SCHEMA_AND_PREPROCESSING.md) — every CSV/API/database field and the exact preprocessing transformation.
+- [`docs/ML_PRIORITY_MODEL.md`](docs/ML_PRIORITY_MODEL.md) — features, synthetic supervision, Gradient Boosting training, inference, integration, metrics, limitations, and production path.
 - [`docs/REPOSITORY_GUIDE.md`](docs/REPOSITORY_GUIDE.md) — directory and file ownership.
 - [`docs/SETUP_AND_RUNNING.md`](docs/SETUP_AND_RUNNING.md) — setup, database, tests, and troubleshooting.
 - [`docs/NATIVE_CPSAT_TEAM_SETUP.md`](docs/NATIVE_CPSAT_TEAM_SETUP.md) and [`optimizer/ORTOOLS.md`](optimizer/ORTOOLS.md) — native solver setup.

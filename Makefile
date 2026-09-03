@@ -19,6 +19,15 @@ env:
 install-deps: env
 	cd frontend && npm ci
 	cd backend && go mod download
+	python3 -m venv work/ml-venv
+	work/ml-venv/bin/python -m pip install -r ml/requirements.txt
+
+.PHONY: train-ml test-ml
+train-ml:
+	work/ml-venv/bin/python -m ml.src.train
+
+test-ml:
+	work/ml-venv/bin/python -m unittest discover -s ml/tests -v
 
 setup-ortools: env
 	bash scripts/setup-ortools.sh
@@ -45,13 +54,13 @@ build-portable:
 build-api:
 	cd backend && go build -o ../build/sih-api ./cmd/api
 
-test: build-optimizer
+test: build-optimizer test-ml
 	ctest --test-dir build --output-on-failure
 	cd backend && go test ./...
 	cd frontend && npm run lint
 
 verify-native: build-optimizer
-	python3 tools/verify_native_cp_sat.py --binary "$(OPTIMIZER_BIN_ABS)" --data "$(ROOT_DIR)/data/scenarios/scenario-alpha" --config "$(ROOT_DIR)/config/optimizer.conf" --time-limit "$(SOLVER_TIME_LIMIT_SECONDS)"
+	python3 tools/verify_native_cp_sat.py --binary "$(OPTIMIZER_BIN_ABS)" --data "$(ROOT_DIR)/data/scenarios/scenario-alpha" --config "$(ROOT_DIR)/config/optimizer.conf" --time-limit "$(SOLVER_TIME_LIMIT_SECONDS)" --python "$(ROOT_DIR)/work/ml-venv/bin/python" --project-root "$(ROOT_DIR)" --model "$(ROOT_DIR)/ml/models/priority_gbr_v1.joblib" --metadata "$(ROOT_DIR)/ml/models/priority_gbr_v1.metadata.json"
 
 benchmark: build-optimizer
 	./scripts/benchmark.sh

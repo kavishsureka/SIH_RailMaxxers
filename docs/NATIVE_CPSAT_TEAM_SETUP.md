@@ -50,6 +50,10 @@ API_ADDR=:8080
 OPTIMIZER_BIN=../build/optimizer/sih-optimizer
 DATA_ROOT=../data/scenarios
 OPTIMIZER_CONFIG=../config/optimizer.conf
+PROJECT_ROOT=..
+ML_PYTHON=../work/ml-venv/bin/python
+ML_MODEL=../ml/models/priority_gbr_v1.joblib
+ML_MODEL_METADATA=../ml/models/priority_gbr_v1.metadata.json
 NEXT_PUBLIC_API_URL=http://localhost:8080
 ORTOOLS_ROOT=.deps/or-tools
 ORTOOLS_VERSION=9.12
@@ -60,6 +64,7 @@ CMAKE_BUILD_PARALLEL_LEVEL=4
 Usually, only these values need changing:
 
 - `DATABASE_URL`: blank means no persistence; set it to use PostgreSQL;
+- `ML_PYTHON`, `ML_MODEL`, and `ML_MODEL_METADATA`: runtime priority inference executable/artifacts;
 - `SOLVER_TIME_LIMIT_SECONDS`: native CP-SAT time budget used by verification and benchmarks;
 - `CMAKE_BUILD_PARALLEL_LEVEL`: lower this if compilation consumes too much memory;
 - `API_ADDR` and `NEXT_PUBLIC_API_URL`: change together if port 8080 is unavailable.
@@ -81,10 +86,10 @@ make setup
 This command:
 
 1. creates `.env` if it is missing;
-2. installs frontend and Go dependencies;
+2. installs frontend and Go dependencies and creates `work/ml-venv` with pinned ML packages;
 3. downloads the pinned OR-Tools C++ archive into `.deps/or-tools`;
 4. builds the C++ optimizer with `SIH_WITH_ORTOOLS=ON`;
-5. runs CP-SAT and requires `native_cp_sat: true` plus a valid result from the independent validator.
+5. runs batch ML inference for Alpha, passes the generated priorities to CP-SAT, and requires `native_cp_sat: true` plus a valid independent-validator result.
 
 The downloaded OR-Tools files stay local and are not added to Git. The setup script currently selects official archives for Apple Silicon/Intel macOS, Ubuntu 20.04/22.04/24.04 x86-64, Debian 11/12 x86-64, and Debian 11 ARM64.
 
@@ -151,7 +156,9 @@ Then run `make dev`. Stop only PostgreSQL with `make db-down`. Use `make down` t
 ```bash
 make build-optimizer  # native OR-Tools build
 make verify-native   # proves CP-SAT is native and validator-approved
-make test            # C++, Go, and frontend checks
+make train-ml        # retrains the persisted priority model when intended
+make test-ml         # ML feature/training/inference tests
+make test            # ML, C++, Go, and frontend checks
 make benchmark       # three algorithms; writes JSON and CSV reports
 ```
 
@@ -204,6 +211,10 @@ Stop the conflicting process. For the API, change both `API_ADDR` and `NEXT_PUBL
 ### Frontend dependencies are missing
 
 Run `make install-deps`. This uses `npm ci`, so dependency versions match the lockfile.
+
+### ML inference fails or Python is missing packages
+
+Run `make install-deps` to recreate/install `work/ml-venv`, then `make test-ml`. Confirm the three `.env` ML paths resolve from `backend/`. The runtime loads the committed model; it does not train on API startup.
 
 ### PostgreSQL is unavailable
 

@@ -150,16 +150,21 @@ bool can_place(const Dataset& data, const CandidateWindows& candidates, const Ta
   return true;
 }
 
-int priority_score(const Task& t) {
-  const int urgency = t.due_slot < kHorizonSlots ? std::max(0, kHorizonSlots - t.due_slot) / kSlotsPerDay : 0;
-  return (critical_task(t) ? 10000 : 0) + 40 * t.severity + 25 * t.criticality + urgency;
+int priority_delay_days(const Task& task, int start_slot) {
+  const int delay_slots = std::max(0, start_slot - task.earliest_slot);
+  return (delay_slots + kSlotsPerDay - 1) / kSlotsPerDay;
+}
+
+std::int64_t priority_delay_cost(const Task& task, int start_slot) {
+  return static_cast<std::int64_t>(std::llround(task.priority_score)) *
+         priority_delay_days(task, start_slot);
 }
 
 std::vector<Task> ordered_tasks(const Dataset& data, std::optional<std::string> department = std::nullopt) {
   std::vector<Task> tasks;
   for (const auto& task : data.tasks) if (!department || task.department == *department) tasks.push_back(task);
   std::stable_sort(tasks.begin(), tasks.end(), [](const Task& a, const Task& b) {
-    return priority_score(a) > priority_score(b);
+    return a.priority_score > b.priority_score;
   });
   // A small topological repair keeps predecessors before their successors.
   for (const auto& dep : data.dependencies) {
@@ -235,6 +240,7 @@ std::vector<Placement> greedy_schedule(const Dataset& data, const CandidateWindo
       const int block_delta = new_active_slots == 0 ? 0 : 1 - touching_blocks;
       std::int64_t value = weights.block_count * block_delta +
                            weights.downtime_minute * new_active_slots * kSlotMinutes;
+      value += weights.priority_weighted_delay * priority_delay_cost(task, start);
       for (const auto& train : data.trains) {
         if (train.hard_conflict || train.corridor_id != task.corridor_id ||
             !overlap(start, end, train.start_slot, train.end_slot)) continue;
@@ -369,6 +375,28 @@ Dataset load_dataset(const std::filesystem::path& dir) {
   return data;
 }
 
+void load_priorities(Dataset& data, const std::filesystem::path& path) {
+  std::unordered_map<std::string, double> scores;
+  read_csv(path, [&](const auto& f) {
+    if (f.size() < 2) throw std::runtime_error("priority row requires task_id and priority_score");
+    const double score = std::stod(f.at(1));
+    if (!std::isfinite(score) || score < 0.0 || score > 100.0) {
+      throw std::runtime_error("priority score outside [0, 100] for " + f.at(0));
+    }
+    if (!scores.emplace(f.at(0), score).second) {
+      throw std::runtime_error("duplicate priority score for " + f.at(0));
+    }
+  });
+  for (auto& task : data.tasks) {
+    const auto score = scores.find(task.id);
+    if (score == scores.end()) throw std::runtime_error("missing ML priority score for " + task.id);
+    task.priority_score = score->second;
+  }
+  if (scores.size() != data.tasks.size()) {
+    throw std::runtime_error("priority file contains unknown or extra task IDs");
+  }
+}
+
 Weights load_weights(const std::filesystem::path& path) {
   Weights w;
   std::ifstream input(path);
@@ -385,6 +413,7 @@ Weights load_weights(const std::filesystem::path& path) {
     else if (key == "wT") w.train_impact = value;
     else if (key == "wL") w.lateness_minute = value;
     else if (key == "wV") w.deadline_violation = value;
+    else if (key == "wP") w.priority_weighted_delay = value;
   }
   return w;
 }
@@ -525,6 +554,7 @@ Metrics calculate_metrics(const Dataset& data, const std::vector<Placement>& pla
     });
     if (placement == placements.end()) continue;
     if (critical) ++m.critical_completed;
+    m.priority_weighted_delay += priority_delay_cost(task, placement->start_slot);
     if (task.due_slot >= 0 && placement->end_slot > task.due_slot) {
       ++m.deadline_violations;
       m.lateness_minutes += (placement->end_slot - task.due_slot) * kSlotMinutes;
@@ -532,7 +562,8 @@ Metrics calculate_metrics(const Dataset& data, const std::vector<Placement>& pla
   }
   m.objective = w.block_count * m.block_count + w.downtime_minute * m.downtime_minutes +
                 w.train_impact * m.train_impact + w.lateness_minute * m.lateness_minutes +
-                w.deadline_violation * m.deadline_violations;
+                w.deadline_violation * m.deadline_violations +
+                w.priority_weighted_delay * m.priority_weighted_delay;
   return m;
 }
 
@@ -667,6 +698,13 @@ Plan solve_cp_sat(const Dataset& data, const Weights& weights, int time_limit_se
     objective += weights.lateness_minute * kSlotMinutes * lateness;
     objective += weights.deadline_violation * violation;
   }
+  for (int i = 0; i < n; ++i) {
+    const auto priority = static_cast<std::int64_t>(std::llround(data.tasks[i].priority_score));
+    for (std::size_t k = 0; k < starts[i].size(); ++k) {
+      objective += weights.priority_weighted_delay * priority *
+                   priority_delay_days(data.tasks[i], starts[i][k]) * x[i][k];
+    }
+  }
   model.Minimize(objective);
   Model solver;
   SatParameters parameters;
@@ -734,6 +772,7 @@ std::string plan_json(const Plan& p) {
       << ",\"downtime_minutes\":" << p.metrics.downtime_minutes << ",\"train_impact\":" << p.metrics.train_impact
       << ",\"lateness_minutes\":" << p.metrics.lateness_minutes
       << ",\"deadline_violations\":" << p.metrics.deadline_violations
+      << ",\"priority_weighted_delay\":" << p.metrics.priority_weighted_delay
       << ",\"scheduled_tasks\":" << p.metrics.scheduled_tasks
       << ",\"total_tasks\":" << p.metrics.total_tasks
       << ",\"critical_completed\":" << p.metrics.critical_completed

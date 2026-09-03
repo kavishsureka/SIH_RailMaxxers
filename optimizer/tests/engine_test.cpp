@@ -1,5 +1,6 @@
 #include "engine.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 
@@ -16,7 +17,7 @@ sih::Dataset soft_train_fixture() {
   sih::Dataset data;
   data.corridors.push_back({"C1", "Test corridor"});
   data.tasks.push_back({"T1", "C1", "ENGINEERING", "TRACK_REPAIR", 2, 8, 8,
-                        8, true, false, 0, 8});
+                        8, true, false, 0, 8, 75.0});
   data.availability.push_back({"C1", 0, 8});
   data.trains.push_back({"S1", "C1", 0, 2, false, 7});
   return data;
@@ -66,6 +67,26 @@ int main() {
     const auto data = soft_train_fixture();
     const auto validation = sih::validate(data, {});
     require(!validation.valid, "validator must reject any unscheduled monthly task");
+  }
+
+  {
+    sih::Dataset data;
+    data.corridors.push_back({"C1", "Priority corridor"});
+    data.tasks.push_back({"LOW", "C1", "ENGINEERING", "LOW_WORK", 2, 5, 5,
+                          sih::kHorizonSlots, false, false, 0, 4, 20.0});
+    data.tasks.push_back({"HIGH", "C1", "ENGINEERING", "HIGH_WORK", 2, 5, 5,
+                          sih::kHorizonSlots, false, false, 0, 4, 90.0});
+    data.availability.push_back({"C1", 0, 4});
+    data.compatibility[{"HIGH_WORK", "LOW_WORK"}] = false;
+    const auto plan = sih::solve_independent(data, sih::Weights{});
+    const auto high = std::find_if(plan.placements.begin(), plan.placements.end(),
+                                   [](const auto& p) { return p.task_id == "HIGH"; });
+    const auto low = std::find_if(plan.placements.begin(), plan.placements.end(),
+                                  [](const auto& p) { return p.task_id == "LOW"; });
+    require(high != plan.placements.end() && low != plan.placements.end(),
+            "priority ordering fixture should schedule every task");
+    require(high->start_slot == 0 && low->start_slot == 2,
+            "higher ML priority should receive the earlier feasible placement");
   }
 
   std::cout << "optimizer unit tests passed\n";

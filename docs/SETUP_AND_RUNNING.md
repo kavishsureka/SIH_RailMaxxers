@@ -11,7 +11,7 @@ RailBlock supports local development with or without PostgreSQL and a full Docke
 | Go | 1.23+ (`backend/go.mod`) |
 | Node.js | 22+ |
 | npm | lockfile installation with `npm ci` |
-| Python | Python 3 |
+| Python | Python 3 plus pinned NumPy/scikit-learn/joblib in `work/ml-venv` |
 | PostgreSQL | optional; Compose uses 17 |
 | Docker | optional |
 
@@ -28,6 +28,8 @@ make setup
 
 `make setup` creates `.env` if needed, installs frontend/Go dependencies, downloads pinned OR-Tools 9.12 to `.deps/or-tools`, builds the native optimizer, and runs `tools/verify_native_cp_sat.py`. Verification requires `native_cp_sat: true` and an independently valid CP-SAT result.
 
+Dependency installation also creates `work/ml-venv` and installs `ml/requirements.txt`. Runtime uses the committed model artifact; setup does not retrain it.
+
 Important defaults in `.env.example`:
 
 ```dotenv
@@ -36,6 +38,10 @@ API_ADDR=:8080
 OPTIMIZER_BIN=../build/optimizer/sih-optimizer
 DATA_ROOT=../data/scenarios
 OPTIMIZER_CONFIG=../config/optimizer.conf
+PROJECT_ROOT=..
+ML_PYTHON=../work/ml-venv/bin/python
+ML_MODEL=../ml/models/priority_gbr_v1.joblib
+ML_MODEL_METADATA=../ml/models/priority_gbr_v1.metadata.json
 NEXT_PUBLIC_API_URL=http://localhost:8080
 ORTOOLS_ROOT=.deps/or-tools
 ORTOOLS_VERSION=9.12
@@ -73,13 +79,17 @@ make verify-native
 The native executable is `build/optimizer/sih-optimizer`.
 
 ```bash
+work/ml-venv/bin/python -m ml.src.inference \
+  --tasks data/scenarios/scenario-alpha/tasks.csv \
+  --output-csv work/priorities-alpha.csv >/dev/null
 ./build/optimizer/sih-optimizer benchmark \
   --data data/scenarios/scenario-alpha \
+  --priorities work/priorities-alpha.csv \
   --config config/optimizer.conf \
   --time-limit 15
 ```
 
-Commands are `independent`, `greedy`, `cp-sat`, and `benchmark`. The result reports solver status, native/fallback identity, validation, metrics, placements, blocks, task traces, and preprocessing/algorithm/total runtimes.
+Commands are `independent`, `greedy`, `cp-sat`, and `benchmark`; `--priorities` is required. The result reports solver status, native/fallback identity, validation, metrics, placements, blocks, task traces, and preprocessing/algorithm/total runtimes.
 
 For troubleshooting without OR-Tools:
 
@@ -87,6 +97,7 @@ For troubleshooting without OR-Tools:
 make build-portable
 ./build-portable/optimizer/sih-optimizer cp-sat \
   --data data/scenarios/scenario-alpha \
+  --priorities work/priorities-alpha.csv \
   --config config/optimizer.conf
 ```
 
@@ -183,7 +194,7 @@ The API image compiles without OR-Tools and exposes the portable fallback. Use l
 make test
 ```
 
-This rebuilds native C++, runs CTest (`optimizer_smoke`, `optimizer_unit`), runs `go test ./...`, and runs the frontend TypeScript check (`npm run lint` → `tsc --noEmit`). It does not run `next build` or browser automation.
+This rebuilds native C++, runs the ML suite, runs CTest (`optimizer_requires_ml_priorities`, `optimizer_unit`), runs `go test ./...`, and runs the frontend TypeScript check (`npm run lint` → `tsc --noEmit`). It does not run `next build` or browser automation.
 
 Useful individual checks:
 
@@ -221,16 +232,17 @@ There is no automated browser suite.
 
 | Value | Exact location | Effect |
 |---|---|---|
-| `wB,wD,wT,wL,wV` | `config/optimizer.conf`; loaded by `load_weights` | weighted objective |
+| `wB,wD,wT,wL,wV,wP` | `config/optimizer.conf`; loaded by `load_weights` | weighted objective, including priority-weighted scheduling delay |
 | CP-SAT limit | `SOLVER_TIME_LIMIT_SECONDS` / CLI `--time-limit` | solver time budget |
 | workers/seed | `solve_cp_sat` in `optimizer/src/engine.cpp` | fixed at 8 / 26027 |
 | candidate step | `candidate_starts` in `engine.cpp` | two slots (30 minutes) |
-| priority formula | `priority_score` in `engine.cpp` | heuristic ordering |
+| ML model hyperparameters/seed | `ml/config/model.json` | training and persisted model version |
+| ML runtime paths | `ML_PYTHON`, `PROJECT_ROOT`, `ML_MODEL`, `ML_MODEL_METADATA` | Go batch-inference process |
 | scenarios/seeds | `Makefile: generate` | stored demo shape |
 | generation distributions | `tools/generate_demo.py` | tasks/trains/windows/dependencies |
 | scenario allowlist | `datasetDefinitions` in `server.go` | API-visible datasets |
 
-`config/priority.conf` and `config/train-weights.conf` are not loaded at runtime.
+Runtime priority is loaded from `ml/models/priority_gbr_v1.joblib`; `config/priority.conf` is a migration pointer and `config/train-weights.conf` is not loaded.
 
 ## Troubleshooting
 
@@ -260,6 +272,10 @@ make verify-native
 ### API says optimizer failed/not found
 
 Run `make build-optimizer`. If starting Go manually, verify paths are relative to `backend/`, or use the absolute exports in `scripts/dev.sh`.
+
+### API says ML priority inference failed
+
+Run `make install-deps` and `make test-ml`. Check `ML_PYTHON`, `PROJECT_ROOT`, `ML_MODEL`, and `ML_MODEL_METADATA`. The model and metadata must travel together, and the metadata feature order must match `ml/src/features.py`.
 
 ### Dashboard says API offline
 

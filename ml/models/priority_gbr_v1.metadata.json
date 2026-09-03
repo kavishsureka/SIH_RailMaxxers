@@ -1,0 +1,46 @@
+{
+  "model_name": "Gradient Boosting Regressor",
+  "model_type": "GradientBoostingRegressor",
+  "model_version": "v1",
+  "training_source": "deterministic synthetic tasks with bootstrap policy labels",
+  "feature_names": [
+    "severity",
+    "asset_criticality",
+    "overdue_factor",
+    "deadline_urgency"
+  ],
+  "sample_count": 50000,
+  "training_sample_count": 40000,
+  "held_out_sample_count": 10000,
+  "random_seed": 26027,
+  "metrics": {
+    "mae": 0.4054213951815633,
+    "rmse": 0.5447148274219404,
+    "r2": 0.998197279807371
+  },
+  "hyperparameters": {
+    "alpha": 0.9,
+    "ccp_alpha": 0.0,
+    "criterion": "friedman_mse",
+    "init": null,
+    "learning_rate": 0.05,
+    "loss": "squared_error",
+    "max_depth": 3,
+    "max_features": null,
+    "max_leaf_nodes": null,
+    "min_impurity_decrease": 0.0,
+    "min_samples_leaf": 8,
+    "min_samples_split": 2,
+    "min_weight_fraction_leaf": 0.0,
+    "n_estimators": 160,
+    "n_iter_no_change": null,
+    "random_state": 26027,
+    "subsample": 1.0,
+    "tol": 0.0001,
+    "validation_fraction": 0.1,
+    "verbose": 0,
+    "warm_start": false
+  },
+  "scikit_learn_version": "1.6.1",
+  "trained_at": "2026-09-03T19:44:32.620576+00:00"
+}

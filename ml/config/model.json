@@ -1,0 +1,14 @@
+{
+  "model_version": "v1",
+  "random_seed": 26027,
+  "sample_count": 50000,
+  "test_size": 0.2,
+  "hyperparameters": {
+    "n_estimators": 160,
+    "learning_rate": 0.05,
+    "max_depth": 3,
+    "min_samples_leaf": 8,
+    "loss": "squared_error",
+    "random_state": 26027
+  }
+}

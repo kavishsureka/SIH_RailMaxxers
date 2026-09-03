@@ -20,13 +20,16 @@ int main(int argc, char** argv) {
   try {
     std::vector<std::string> args(argv + 1, argv + argc);
     if (args.empty()) {
-      std::cerr << "usage: sih-optimizer <independent|greedy|cp-sat|benchmark> --data DIR --config FILE\n";
+      std::cerr << "usage: sih-optimizer <independent|greedy|cp-sat|benchmark> --data DIR --priorities FILE --config FILE\n";
       return 2;
     }
     const auto data_dir = option(args, "--data", "data/demo");
     const auto config = option(args, "--config", "config/optimizer.conf");
     const int time_limit = std::stoi(option(args, "--time-limit", "15"));
-    const auto data = sih::load_dataset(data_dir);
+    const auto priorities = option(args, "--priorities");
+    if (priorities.empty()) throw std::runtime_error("--priorities is required; runtime priority must come from ML inference");
+    auto data = sih::load_dataset(data_dir);
+    sih::load_priorities(data, priorities);
     const auto weights = sih::load_weights(config);
 
     if (args[0] == "independent") std::cout << sih::plan_json(sih::solve_independent(data, weights));

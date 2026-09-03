@@ -9,6 +9,7 @@ payload = json.loads(source.read_text())
 fields = ["algorithm", "solver_status", "native_cp_sat", "preprocessing_ms", "algorithm_ms",
           "total_runtime_ms", "valid", "violations", "objective", "block_count",
           "downtime_minutes", "train_impact", "lateness_minutes", "deadline_violations",
+          "priority_weighted_delay",
           "scheduled_tasks", "total_tasks", "critical_completed", "critical_total"]
 with destination.open("w", newline="") as stream:
     writer = csv.DictWriter(stream, fieldnames=fields)

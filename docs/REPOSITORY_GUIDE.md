@@ -1,6 +1,6 @@
 # Repository structure and ownership
 
-This is a navigation index for the implemented repository. For algorithm and schema details, see [`IMPLEMENTATION_GUIDE.md`](IMPLEMENTATION_GUIDE.md).
+This is a navigation index for the implemented repository. Start with [`IMPLEMENTATION_GUIDE.md`](IMPLEMENTATION_GUIDE.md), then use the focused [solver](SOLVER_AND_OPTIMIZATION.md), [data/preprocessing](DATA_SCHEMA_AND_PREPROCESSING.md), and [ML](ML_PRIORITY_MODEL.md) guides.
 
 ## Top-level map
 
@@ -20,6 +20,7 @@ This is a navigation index for the implemented repository. For algorithm and sch
 ├── db/migrations/                 PostgreSQL schema and dataset-ID upgrade
 ├── docs/                          team documentation
 ├── frontend/app/                  Next.js layout, page/components, and CSS
+├── ml/                            priority features, training, model, inference
 ├── optimizer/
 │   ├── include/                   shared C++ data and public engine contract
 │   ├── src/                       loading, algorithms, validation, JSON CLI
@@ -37,13 +38,14 @@ Generated/downloaded directories include `.deps/`, `build/`, `build-portable/`, 
 ## Runtime boundaries
 
 ```text
-Browser → Next.js → Go HTTP API → C++ CLI → JSON stdout
-                          │
-                          └→ PostgreSQL benchmark_runs (optional)
+Browser → Next.js → Go HTTP API → Python ML batch → priority CSV → C++ CLI
+                          │                                      │
+                          └→ PostgreSQL benchmark_runs           └→ JSON stdout
 ```
 
 - Next.js owns display state, filters, drawers, and HTTP calls.
-- Go owns the public API, fixed scenario allowlist, subprocess timeout, JSON checks, and persistence.
+- Go owns the public API, fixed scenario allowlist, ML/C++ process orchestration, shared timeout, JSON checks, and persistence.
+- Python/scikit-learn owns task feature extraction and versioned priority inference.
 - C++ owns CSV/config loading, preprocessing, scheduling, blocks, validation, metrics, runtimes, traces, and JSON.
 - PostgreSQL is not optimizer input. CSV under `data/scenarios/{dataset_id}` is reloaded per invocation.
 
@@ -54,7 +56,8 @@ Browser → Next.js → Go HTTP API → C++ CLI → JSON stdout
 | Target | Current behavior |
 |---|---|
 | `env` | create `.env` from `.env.example` if missing |
-| `install-deps` | `npm ci` and `go mod download` |
+| `install-deps` | frontend/Go dependencies plus ML virtualenv/packages |
+| `train-ml`, `test-ml` | retrain persisted priority model / run ML tests |
 | `setup-ortools` | install pinned OR-Tools under `.deps/or-tools` |
 | `generate` | reproduce the three stored medium scenarios |
 | `generate-presets` | create 100/250/500-task offline datasets |
@@ -68,7 +71,13 @@ Browser → Next.js → Go HTTP API → C++ CLI → JSON stdout
 
 `.env.example` configures locations and ports, but not scenario identity. `DATA_ROOT` is the parent of all scenarios; each request sends `dataset_id`.
 
-Compose starts PostgreSQL 17, Go plus a portable C++ binary, and standalone Next.js. `backend/Dockerfile` compiles without OR-Tools, so container CP-SAT-shaped results show `native_cp_sat: false`. `frontend/Dockerfile` embeds `NEXT_PUBLIC_API_URL` at build time.
+Compose starts PostgreSQL 17, Go plus Python ML and a portable C++ binary, and standalone Next.js. `backend/Dockerfile` installs pinned ML packages/artifacts but compiles without OR-Tools, so container CP-SAT-shaped results show `native_cp_sat: false`. `frontend/Dockerfile` embeds `NEXT_PUBLIC_API_URL` at build time.
+
+## ML priority engine
+
+`ml/src/features.py` defines the four-feature order and task adapter. `labels.py` contains offline-only bootstrap supervision. `generate_data.py` creates deterministic synthetic training examples. `train.py` fits/evaluates/persists `GradientBoostingRegressor`; `inference.py` only loads the artifact and predicts.
+
+`ml/config/model.json` owns model version, seeds, split, sample count, and hyperparameters. `ml/models/priority_gbr_v1.joblib` and its metadata JSON are deployed together. See [`ML_PRIORITY_MODEL.md`](ML_PRIORITY_MODEL.md).
 
 ## C++ optimizer
 
@@ -86,10 +95,10 @@ Parses:
 
 ```text
 sih-optimizer <independent|greedy|cp-sat|benchmark>
-  --data DIR --config FILE --time-limit SECONDS
+  --data DIR --priorities FILE --config FILE --time-limit SECONDS
 ```
 
-Defaults are `data/demo`, `config/optimizer.conf`, and 15 seconds.
+`--priorities` is required. Other defaults are `data/demo`, `config/optimizer.conf`, and 15 seconds.
 
 ### `optimizer/src/engine.cpp`
 
@@ -99,7 +108,7 @@ The validator rechecks placements against source data rather than solver variabl
 
 ### Tests and build
 
-`optimizer/tests/engine_test.cpp` tests HARD-interval merging, SOFT feasibility/cost, CP-SAT placement choice, task traces, and rejection of an unscheduled task. `optimizer/CMakeLists.txt` also registers a full Alpha smoke benchmark.
+`optimizer/tests/engine_test.cpp` tests HARD-interval merging, SOFT feasibility/cost, CP-SAT placement choice, task traces, rejection of an unscheduled task, and ML-priority ordering. CMake also registers a WILL_FAIL test proving the CLI refuses to run without priorities.
 
 ## CSV and configuration ownership
 
@@ -114,9 +123,9 @@ Each `data/scenarios/*` directory contains:
 | `dependencies.csv` | predecessor, successor, minimum lag slots |
 | `compatibility.csv` | task-type pair and Boolean compatibility |
 
-`config/optimizer.conf` is actively parsed. `config/priority.conf` and `config/train-weights.conf` are explanatory only: current priority is in `priority_score`, and actual train weights are in `trains.csv`.
+`config/optimizer.conf` is actively parsed. Runtime priority comes from the persisted model configured in `ml/config/model.json`; `config/priority.conf` is only a migration pointer. Actual train weights remain in `trains.csv`.
 
-`tools/generate_demo.py` creates the deterministic scenario CSVs. `scripts/benchmark.sh` benchmarks Alpha and honors `SOLVER_TIME_LIMIT_SECONDS`. `tools/benchmark_report.py` makes CSV. `tools/verify_native_cp_sat.py` requires native CP-SAT and validator PASS. `scripts/dev.sh` starts Go and Next.js with absolute repo paths.
+`tools/generate_demo.py` creates deterministic scenario CSVs. `scripts/benchmark.sh` runs ML inference for Alpha, passes the temporary priorities to C++, and honors `SOLVER_TIME_LIMIT_SECONDS`. `tools/benchmark_report.py` exports all metrics including priority-weighted delay. `tools/verify_native_cp_sat.py` runs ML inference then requires native CP-SAT and validator PASS. `scripts/dev.sh` starts Go and Next.js with absolute repo paths.
 
 ## Go backend
 
@@ -138,7 +147,7 @@ Defines routes, the fixed Alpha/Beta/Gamma catalog, default Alpha, `dataset_id` 
 
 ### `backend/internal/optimizer/runner.go`
 
-`CommandRunner.run` adds a five-second grace period to the solver limit, passes CLI arguments, rejects process/JSON failures, and injects `dataset_id` into the outer result and benchmark plans. Accepted algorithms are `independent`, `greedy`, and `cp-sat`.
+`CommandRunner.infer` launches the persisted Python model once per request. `CommandRunner.run` writes those predictions to a temporary CSV, passes it to C++, and shares the batch across all benchmark algorithms. It adds a five-second grace period, rejects ML/process/JSON failures, and injects dataset/model provenance. Accepted algorithms are `independent`, `greedy`, and `cp-sat`.
 
 ### `backend/internal/store/postgres.go`
 
@@ -164,7 +173,7 @@ Only `benchmark_runs` is written today. Normalized planning tables are neither l
 4. `Verification` — validator result, violation categories, runtime split;
 5. `BenchmarkPage` — same-dataset cost/runtime charts and metric table.
 
-It also contains `TaskDrawer`, `CandidateTimeline`, and `BlockDrawer`. `Home` loads the catalog, then requests benchmark and dataset JSON in parallel and rejects mismatched `dataset_id` values.
+It also contains `PriorityModelCard`, `TaskDrawer`, `CandidateTimeline`, and `BlockDrawer`. `Home` loads the catalog, then requests benchmark and dataset JSON in parallel and rejects mismatched `dataset_id` values. Priority scores drive the table/filter and are shown with model provenance.
 
 `globals.css` owns the responsive visual system; `layout.tsx` owns metadata; `next.config.ts` enables standalone output. The npm `lint` script is `tsc --noEmit`, not ESLint.
 
@@ -175,7 +184,7 @@ It also contains `TaskDrawer`, `CandidateTimeline`, and `BlockDrawer`. `Home` lo
 | Horizon/input/result field | `model.hpp`, `engine.cpp`, Go/TypeScript types |
 | Candidate or hard rule | `engine.cpp`, `engine_test.cpp`, UI verification copy |
 | Objective weights | `config/optimizer.conf` |
-| Priority formula | `priority_score` in `engine.cpp` |
+| ML features/training/inference | `ml/src`, `ml/config/model.json`, `ml/models` |
 | Scenario generation/count | generator, `Makefile`, API descriptions |
 | Dataset allowlist/API | `server.go`, `server_test.go` |
 | Subprocess behavior | `runner.go` |

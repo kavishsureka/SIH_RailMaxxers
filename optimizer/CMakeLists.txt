@@ -16,8 +16,9 @@ if(SIH_WITH_ORTOOLS)
 endif()
 
 enable_testing()
-add_test(NAME optimizer_smoke
+add_test(NAME optimizer_requires_ml_priorities
   COMMAND sih-optimizer benchmark
     --data ${CMAKE_SOURCE_DIR}/data/scenarios/scenario-alpha
     --config ${CMAKE_SOURCE_DIR}/config/optimizer.conf)
+set_tests_properties(optimizer_requires_ml_priorities PROPERTIES WILL_FAIL TRUE)
 add_test(NAME optimizer_unit COMMAND sih-optimizer-tests)

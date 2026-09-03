@@ -2,14 +2,22 @@
 
 This guide explains the code that exists today. It is intended for onboarding, debugging, demonstrations, and viva preparation. Paths and symbols refer to the repository root.
 
+Focused deep dives:
+
+- [`SOLVER_AND_OPTIMIZATION.md`](SOLVER_AND_OPTIMIZATION.md) — exact candidate domains, Independent/Greedy/CP-SAT mechanics, variables, constraints, objective, extraction, and timing.
+- [`DATA_SCHEMA_AND_PREPROCESSING.md`](DATA_SCHEMA_AND_PREPROCESSING.md) — CSV, temporary priority, C++, API, and PostgreSQL schemas plus preprocessing examples.
+- [`ML_PRIORITY_MODEL.md`](ML_PRIORITY_MODEL.md) — features, synthetic labels, Gradient Boosting training/evaluation, runtime integration, limitations, and production path.
+
 ## 1. System mental model
 
 RailBlock receives a fixed 28-day monthly workload and compares three ways to place every task exactly once. All three algorithms see the same preprocessed legal windows, produce placements, and then pass through the same block builder, validator, KPI calculator, evidence-trace builder, and runtime recorder.
 
 ```text
-stored scenario CSV
-    ↓
-shared candidate windows
+stored scenario tasks → persisted ML model → one priority batch
+          │                         │
+          └──────────┬──────────────┘
+                     ↓
+scenario + priority CSV → shared candidate windows
     ↓
 Independent | Greedy | CP-SAT
     ↓
@@ -40,7 +48,7 @@ backend/
   internal/store/postgres.go      benchmark JSON insert
 config/
   optimizer.conf                 active weighted-objective values
-  priority.conf                  explanatory only; not loaded
+  priority.conf                  migration pointer to ML configuration
   train-weights.conf             explanatory only; not loaded
 data/
   scenarios/scenario-{alpha,beta,gamma}/  live deterministic CSV datasets
@@ -51,6 +59,11 @@ frontend/app/
   page.tsx                        all pages, types, API state, drawers
   globals.css                     full responsive styling
   layout.tsx                      root metadata/layout
+ml/
+  config/model.json               model version, split, seed, hyperparameters
+  models/                         persisted joblib model and metadata
+  src/                            features, labels, generation, train, inference
+  tests/                          ML pipeline tests
 optimizer/
   include/model.hpp               common C++ types/constants
   include/engine.hpp              public engine functions
@@ -76,7 +89,7 @@ tools/
 Inputs:
 
 - `Corridor {id, name}`;
-- `Task {id, corridor_id, department, type, duration_slots, severity, criticality, due_slot, mandatory, requires_power_block, earliest_slot, latest_end_slot}`;
+- `Task {id, corridor_id, department, type, duration_slots, severity, criticality, due_slot, mandatory, requires_power_block, earliest_slot, latest_end_slot, priority_score}`;
 - `TrainMovement {id, corridor_id, start_slot, end_slot, hard_conflict, impact_weight}`;
 - `AvailabilityWindow`, `Dependency`, and the compatibility map keyed by sorted task-type pairs.
 
@@ -86,13 +99,13 @@ Intermediate/output types:
 - `Placement {task_id, start_slot, end_slot}`;
 - `Block {corridor_id, start_slot, end_slot}`;
 - `CandidateEvaluation` and `TaskTrace`;
-- `Weights`, `Metrics`, `ValidationResult`, and `Plan`.
+- `Weights` including `priority_weighted_delay`, `Metrics` including the accumulated score-days, `ValidationResult`, and `Plan`.
 
 `Plan` holds algorithm/solver identity, three runtime fields, `native_cp_sat`, placements, derived blocks, traces, metrics, and validation.
 
 ### 3.2 CSV and weight loading
 
-`load_dataset` in `optimizer/src/engine.cpp` reads six named CSV files. The parser skips the header, empty lines, and `#` comments and reports file/row errors. `load_weights` reads integer `key=value` pairs for `wB`, `wD`, `wT`, `wL`, and `wV`.
+`load_dataset` in `optimizer/src/engine.cpp` reads six named CSV files. The parser skips the header, empty lines, and `#` comments and reports file/row errors. `load_priorities` then requires one finite `[0,100]` score per task from the Go-generated temporary CSV. `load_weights` reads integer `key=value` pairs for `wB`, `wD`, `wT`, `wL`, `wV`, and `wP`.
 
 Booleans accept `1`, `true`, `TRUE`, or `HARD`; train loading explicitly compares `conflict_mode` to `HARD`.
 
@@ -130,16 +143,7 @@ For each task it:
 
 `can_place` checks candidate membership; incompatible overlaps on the same corridor when coordination is enabled; and predecessor/successor minimum lags against already placed tasks.
 
-`ordered_tasks` ranks by `priority_score` and performs a small topological repair so a predecessor appears before its successor. The formula is:
-
-```text
-(critical ? 10000 : 0)
-+ 40*severity
-+ 25*criticality
-+ max(0, 2688-due_slot)/96 when due_slot is inside the month
-```
-
-This formula is hard-coded. `config/priority.conf` is not read.
+`ordered_tasks` ranks by the batch-inferred `Task.priority_score` and performs a small topological repair so a predecessor appears before its successor. Go generates every score with the persisted `GradientBoostingRegressor` before C++ starts. The former policy formula is now isolated in `ml/src/labels.py` and is used only for offline synthetic supervision.
 
 ### 3.6 Independent baseline
 
@@ -160,6 +164,7 @@ For every feasible candidate start, it estimates incremental:
 - newly impacted SOFT train weights;
 - lateness minutes;
 - one deadline-violation penalty.
+- rounded ML priority multiplied by whole/partial days after `earliest_slot`.
 
 It chooses the smallest weighted increment. If the first coordinated pass does not schedule all tasks, the implementation replaces it with `departmental_schedule` so the final validator can still enforce completeness.
 
@@ -178,6 +183,7 @@ Model structure:
 - precedence constraints using predecessor duration and `min_lag_slots`;
 - a SOFT-train `impacted` Boolean linked to active block slots;
 - lateness integer and violation Boolean for noncritical due dates still in the horizon.
+- candidate-dependent ML priority-delay coefficients.
 
 Availability, task windows, critical due dates, and HARD trains are already encoded in candidate domains, so the CP-SAT model does not need separate interval constraints for them.
 
@@ -203,6 +209,7 @@ objective = wB * block_count
           + wT * train_impact
           + wL * lateness_minutes
           + wV * deadline_violations
+          + wP * priority_weighted_delay
 ```
 
 Committed values in `config/optimizer.conf`:
@@ -211,9 +218,10 @@ Committed values in `config/optimizer.conf`:
 |---|---:|---|
 | `wB` | 400 | derived block count |
 | `wD` | 2 | corridor downtime minute |
-| `wT` | 25 | sum of impacted SOFT movement weights |
+| `wT` | 100 | sum of impacted SOFT movement weights |
 | `wL` | 5 | late minute |
 | `wV` | 5000 | task finishing after due slot |
+| `wP` | 1 | rounded priority × delayed days after earliest start |
 
 This is one weighted integer objective, not lexicographic optimization. An unscheduled penalty cannot appear because exactly-once scheduling is a hard requirement.
 
@@ -228,6 +236,7 @@ This is one weighted integer objective, not lexicographic optimization. An unsch
 - scheduled/total tasks;
 - critical completed/total;
 - lateness minutes and deadline violations;
+- priority-weighted delay score-days;
 - weighted objective.
 
 `build_task_traces` provides a compact explanation sample, not the solver's complete internal search log. It includes the selected candidate; up to a few feasible window endpoints; sample HARD conflicts; and a too-short availability interval if available. For selected/feasible items it computes raw SOFT `train_cost`, added downtime minutes against other blocks, and `block_reuse`.
@@ -240,6 +249,8 @@ Runtime meanings:
 - `algorithm_ms`: algorithm/solver section only;
 - `total_runtime_ms`: from solver entry through block derivation, traces, validation, metrics, and final reporting work;
 - raw `runtime_ms`: JSON alias equal to total runtime.
+
+These C++ timings exclude scenario/config loading, temporary priority loading, Python process startup/inference, Go response wrapping, and database persistence. The HTTP request context covers both ML and C++ with a solver-limit-plus-five-seconds timeout.
 
 ## 4. Validator
 
@@ -342,6 +353,10 @@ Dependencies link same-corridor tasks in adjacent rounds with 0–2 slot lag and
 - `OPTIMIZER_BIN`;
 - `DATA_ROOT`;
 - `OPTIMIZER_CONFIG`;
+- `PROJECT_ROOT`;
+- `ML_PYTHON`;
+- `ML_MODEL`;
+- `ML_MODEL_METADATA`;
 - `SOLVER_TIME_LIMIT_SECONDS` (default 15).
 
 It opens pgx when configured, but logs and continues if PostgreSQL is unavailable.
@@ -367,18 +382,19 @@ For `GET`, `dataset_id` comes from the query. For benchmark `POST`, it comes fro
 `GET/POST /api/benchmark` returns:
 
 ```text
-dataset_id, horizon_days, horizon_weeks, horizon_slots, slot_minutes, plans[]
+dataset_id, horizon_days, horizon_weeks, horizon_slots, slot_minutes,
+priority_model, task_priorities[], plans[]
 ```
 
-Every plan has `dataset_id`, `algorithm`, `solver_status`, runtime fields, `native_cp_sat`, `validation`, `metrics`, `placements`, `blocks`, and `task_traces` (the runner's Go struct does not declare traces, but its generic JSON mutation preserves them).
+Every plan has `dataset_id`, `algorithm`, `solver_status`, runtime fields, `native_cp_sat`, `priority_source`, `priority_model_version`, `validation`, `metrics`, `placements`, `blocks`, and `task_traces` (the runner's Go struct does not declare traces, but its generic JSON mutation preserves them). `metrics` includes `priority_weighted_delay`.
 
 `GET /api/plans/{algorithm}` accepts only `independent`, `greedy`, or `cp-sat`.
 
 ### Process orchestration
 
-`CommandRunner.run` uses `exec.CommandContext` with arguments `command --data ... --config ... --time-limit ...`. Process timeout is `TimeLimit + 5s`. It uses combined stdout/stderr, rejects nonzero exits, unmarshals JSON into a generic map, injects dataset IDs, and marshals it again.
+`CommandRunner.run` first calls `CommandRunner.infer`, which launches `ML_PYTHON -m ml.src.inference` for the selected `tasks.csv`. It rejects failed/incomplete inference, writes one temporary `task_id,priority_score` CSV, and invokes C++ with `command --data ... --priorities ... --config ... --time-limit ...`. The shared request timeout is `TimeLimit + 5s` and includes both inference and optimization. Go rejects process/JSON failures, injects dataset/model provenance, removes the temporary file, and marshals the response.
 
-Benchmark runs all algorithms sequentially inside one C++ process in order: Independent, Greedy, CP-SAT. If persistence is enabled, Go stores the returned document after the optimizer succeeds. Persistence failure is logged but does not fail the HTTP response.
+Benchmark runs one ML batch, then all algorithms sequentially inside one C++ process in order: Independent, Greedy, CP-SAT. All three therefore use identical scores. If persistence is enabled, Go stores the returned document after the optimizer succeeds. Persistence failure is logged but does not fail the HTTP response.
 
 ## 8. Frontend architecture
 
@@ -388,13 +404,13 @@ The frontend is Next.js App Router with React 19. `frontend/app/page.tsx` is a s
 
 Pages:
 
-- `Overview`: treats CP-SAT as recommended, compares it with Independent, and shows weekly distribution.
+- `Overview`: treats CP-SAT as recommended, compares it with Independent, shows weekly distribution, and renders persisted ML metadata in `PriorityModelCard`.
 - `Planner`: a seven-day slice of the 28-day plan with algorithm, week, corridor, and department filters; separate train, block, Engineering, S&T, and TRD lanes.
-- `Tasks`: monthly task table with search and status/priority/department/week filters.
+- `Tasks`: monthly task table with search and status/ML-priority/department/week filters.
 - `Verification`: solver status, validator result, violations, and runtime composition. Its category counts are UI string classification, not separate validator executions.
 - `BenchmarkPage`: normalized operational-cost chart, runtime chart, and full metric table for all three algorithms.
 
-`TaskDrawer` shows task metadata, selected placement/block, compact candidate trace, and evidence-derived reasons. `BlockDrawer` shows tasks grouped by department, client-derived checks, and a simple consolidation benefit (`tasks in block - 1`). Drawer checks explain existing results; the authoritative validation remains C++.
+`TaskDrawer` shows task metadata, ML score/source/model version, selected placement/block, compact candidate trace, and evidence-derived reasons. `BlockDrawer` shows tasks grouped by department, client-derived checks, and a simple consolidation benefit (`tasks in block - 1`). Drawer checks explain existing results; the authoritative validation remains C++.
 
 ## 9. End-to-end flows
 
@@ -406,9 +422,12 @@ user selects Scenario Beta
   → POST /api/benchmark {dataset_id}
       + GET /api/dataset?dataset_id=... in parallel
   → Go resolves data/scenarios/scenario-beta
-  → C++ loads same CSV/config and runs all three algorithms
+  → Python loads the persisted model and predicts one priority batch
+  → Go writes a temporary priority CSV
+  → C++ loads same scenario/config/priorities and runs all three algorithms
   → each finalizes through shared blocks/validator/metrics/traces
   → Go injects dataset IDs
+      + persisted model metadata and priority provenance
   → optional benchmark_runs insert
   → frontend verifies IDs and updates every page
 ```
@@ -444,14 +463,15 @@ There is no read-history endpoint and no normalized plan write path.
 | benchmark limit | `SOLVER_TIME_LIMIT_SECONDS` in `scripts/benchmark.sh` |
 | CP-SAT workers/seed | `parameters.set_num_search_workers(8)` / `set_random_seed(26027)` |
 | candidate granularity | `start += 2` in `candidate_starts` |
-| heuristic order | `priority_score` / `ordered_tasks` |
+| model hyperparameters/seed | `ml/config/model.json` |
+| ML feature extraction/order | `ml/src/features.py`; `Task.priority_score` / `ordered_tasks` |
 | scenario sizes/seeds | `generate` recipes in `Makefile` |
 | generator distributions | constants/profile maps in `generate_demo.py` |
 | API catalog/default | `datasetDefinitions` / `defaultDatasetID` in `server.go` |
 
 Changing objective weights needs no rebuild, because the CLI reloads the config each invocation. Changing C++ parameters or candidate granularity needs a rebuild. Changing `NEXT_PUBLIC_API_URL` needs a frontend restart in development and rebuild for production.
 
-Do not assume `priority.conf` or `train-weights.conf` changes runtime behavior until loaders are implemented.
+`config/priority.conf` is a migration pointer only; runtime model settings are in `ml/config/model.json`. `config/train-weights.conf` remains explanatory.
 
 ## 11. Run, seed, benchmark, test, troubleshoot
 
@@ -459,8 +479,10 @@ Do not assume `priority.conf` or `train-weights.conf` changes runtime behavior u
 cp .env.example .env
 make setup             # dependencies + native verification
 make generate          # deterministic Alpha/Beta/Gamma
+make train-ml          # deliberate model retraining
+make test-ml           # ML feature/training/inference tests
 make dev               # native local API + Next.js
-make test              # CTest + Go + TypeScript
+make test              # ML + CTest + Go + TypeScript
 make benchmark         # Alpha JSON/CSV artifacts
 make db-up              # optional PostgreSQL
 ```
@@ -469,6 +491,7 @@ For failures:
 
 - `native_cp_sat:false`: likely Docker or `build-portable`; use `build/optimizer/sih-optimizer` and `make verify-native`.
 - optimizer missing: run `make build-optimizer` and check `OPTIMIZER_BIN` relative to the backend process.
+- ML inference failed: run `make install-deps` and `make test-ml`; verify Python/project/model/metadata paths.
 - unknown dataset: use one of the three allowlisted IDs and confirm `DATA_ROOT` contains it.
 - dataset mismatch in UI: verify benchmark and dataset calls reach the same API and no stale proxy/cache changes response IDs.
 - PostgreSQL tables absent: apply `001_init.sql` then `002_dataset_ids.sql`, or initialize a fresh Compose volume.

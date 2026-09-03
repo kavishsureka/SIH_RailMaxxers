@@ -9,4 +9,5 @@ coverage/
 work/
 benchmark-results/
 data/generated/
+ml/data/*.csv
 *.log

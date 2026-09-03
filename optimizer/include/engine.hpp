@@ -7,6 +7,7 @@
 namespace sih {
 
 Dataset load_dataset(const std::filesystem::path& directory);
+void load_priorities(Dataset& data, const std::filesystem::path& priorities_csv);
 Weights load_weights(const std::filesystem::path& config);
 CandidateWindows generate_candidate_windows(const Dataset& data);
 std::vector<Block> derive_blocks(const Dataset& data, const std::vector<Placement>& placements);

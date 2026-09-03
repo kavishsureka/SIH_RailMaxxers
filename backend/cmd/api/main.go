@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -28,6 +29,15 @@ func envSeconds(key string, fallback int) time.Duration {
 	return time.Duration(value) * time.Second
 }
 
+func absoluteEnv(key, fallback string) string {
+	value := env(key, fallback)
+	absolute, err := filepath.Abs(value)
+	if err != nil {
+		return value
+	}
+	return absolute
+}
+
 func main() {
 	ctx := context.Background()
 	var database *store.Store
@@ -43,11 +53,15 @@ func main() {
 		}
 	}
 	runner := optimizer.CommandRunner{
-		Binary:    env("OPTIMIZER_BIN", "../build/optimizer/sih-optimizer"),
-		Config:    env("OPTIMIZER_CONFIG", "../config/optimizer.conf"),
-		TimeLimit: envSeconds("SOLVER_TIME_LIMIT_SECONDS", 15),
+		Binary:        absoluteEnv("OPTIMIZER_BIN", "../build/optimizer/sih-optimizer"),
+		Config:        absoluteEnv("OPTIMIZER_CONFIG", "../config/optimizer.conf"),
+		TimeLimit:     envSeconds("SOLVER_TIME_LIMIT_SECONDS", 15),
+		Python:        absoluteEnv("ML_PYTHON", "../work/ml-venv/bin/python"),
+		ProjectRoot:   absoluteEnv("PROJECT_ROOT", ".."),
+		Model:         absoluteEnv("ML_MODEL", "../ml/models/priority_gbr_v1.joblib"),
+		ModelMetadata: absoluteEnv("ML_MODEL_METADATA", "../ml/models/priority_gbr_v1.metadata.json"),
 	}
 	address := env("API_ADDR", ":8080")
 	log.Printf("SIH planner API listening on %s", address)
-	log.Fatal(http.ListenAndServe(address, httpapi.New(runner, benchmarkStore, env("DATA_ROOT", "../data/scenarios"))))
+	log.Fatal(http.ListenAndServe(address, httpapi.New(runner, benchmarkStore, absoluteEnv("DATA_ROOT", "../data/scenarios"))))
 }

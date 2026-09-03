@@ -29,6 +29,7 @@ struct Task {
   bool requires_power_block{};
   int earliest_slot{};
   int latest_end_slot{kHorizonSlots};
+  double priority_score{};
 };
 
 struct TrainMovement {
@@ -82,6 +83,7 @@ struct Weights {
   std::int64_t train_impact{25};
   std::int64_t lateness_minute{5};
   std::int64_t deadline_violation{5000};
+  std::int64_t priority_weighted_delay{1};
 };
 
 struct Dataset {
@@ -99,6 +101,7 @@ struct Metrics {
   int train_impact{};
   int lateness_minutes{};
   int deadline_violations{};
+  std::int64_t priority_weighted_delay{};
   int scheduled_tasks{};
   int total_tasks{};
   int critical_completed{};

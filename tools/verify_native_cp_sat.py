@@ -5,6 +5,8 @@ import argparse
 import json
 import subprocess
 import sys
+import tempfile
+from pathlib import Path
 
 
 def main() -> int:
@@ -13,7 +15,23 @@ def main() -> int:
     parser.add_argument("--data", required=True)
     parser.add_argument("--config", required=True)
     parser.add_argument("--time-limit", type=int, default=10)
+    parser.add_argument("--python", default=sys.executable)
+    parser.add_argument("--project-root", required=True)
+    parser.add_argument("--model", required=True)
+    parser.add_argument("--metadata", required=True)
     args = parser.parse_args()
+
+    priority_file = tempfile.NamedTemporaryFile(suffix=".csv", delete=False)
+    priority_file.close()
+    inference = subprocess.run(
+        [args.python, "-m", "ml.src.inference", "--tasks", str(Path(args.data) / "tasks.csv"),
+         "--model", args.model, "--metadata", args.metadata, "--output-csv", priority_file.name],
+        cwd=args.project_root, check=False, capture_output=True, text=True,
+    )
+    if inference.returncode != 0:
+        print(f"ERROR: ML priority inference failed: {inference.stderr}", file=sys.stderr)
+        Path(priority_file.name).unlink(missing_ok=True)
+        return 1
 
     completed = subprocess.run(
         [
@@ -21,6 +39,8 @@ def main() -> int:
             "cp-sat",
             "--data",
             args.data,
+            "--priorities",
+            priority_file.name,
             "--config",
             args.config,
             "--time-limit",
@@ -30,6 +50,7 @@ def main() -> int:
         capture_output=True,
         text=True,
     )
+    Path(priority_file.name).unlink(missing_ok=True)
     if completed.returncode != 0:
         print(f"ERROR: native optimizer exited with code {completed.returncode}.", file=sys.stderr)
         if completed.stderr:
